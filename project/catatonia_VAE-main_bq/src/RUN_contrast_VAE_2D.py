@@ -24,6 +24,7 @@ from utils.logging_utils import (
     log_model_ready,
     log_model_setup,
     setup_logging,
+    log_atlas_mode
 )
 
 # Use non-interactive plotting to avoid tmux crashes
@@ -53,7 +54,7 @@ def main(atlas_name: str, num_epochs: int):
         # Input / Output Paths
         TRAIN_CSV= ["/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data_training/training_metadata.csv"], #"/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data_training/hc_metadata.csv", # TEST_CSV=["./data/relevant_metadata/testing_metadata.csv"],
         TEST_CSV= ["/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data_training/testing_metadata.csvs"], #"/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data_training/non_hc_metadata.csv",
-        MRI_DATA_PATH="/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data/train_xml_data_t", #"./data/raw_extracted_xml_data/train_xml_data", # This is the h5 file!
+        MRI_DATA_PATH="/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data/train_xml_data", #"./data/raw_extracted_xml_data/train_xml_data", # This is the h5 file!
         ATLAS_NAME=atlas_name,
         PROC_DATA_PATH="/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data_training/proc_extracted_xml_data",
         OUTPUT_DIR="/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/analysis",
@@ -63,26 +64,26 @@ def main(atlas_name: str, num_epochs: int):
         PRETRAIN_METRICS_PATH=None,
         CONTINUE_FROM_EPOCH=0,
         # Loss Parameters
-        RECON_LOSS_WEIGHT=5.0,
-        KLDIV_LOSS_WEIGHT=1.0,
-        CONTR_LOSS_WEIGHT=0.0,  # if not zero, you're not running basicVAE
+        RECON_LOSS_WEIGHT=40.0,
+        KLDIV_LOSS_WEIGHT=4.0,
+        CONTR_LOSS_WEIGHT=4.0,  # if not zero, you're not running basicVAE
         #USE_SSIM=True,
         # Learning and Regularization
-        TOTAL_EPOCHS=10,
-        LEARNING_RATE=1e-5,
-        WEIGHT_DECAY=1e-3,
+        TOTAL_EPOCHS=num_epochs,
+        LEARNING_RATE=4e-5,
+        WEIGHT_DECAY=4e-3,
         EARLY_STOPPING=True,
-        STOP_LEARNING_RATE=1e-7,
-        SCHEDULE_ON_VALIDATION=False,
-        SCHEDULER_PATIENCE=10,
+        STOP_LEARNING_RATE=4e-8,
+        SCHEDULE_ON_VALIDATION=True,
+        SCHEDULER_PATIENCE=6,
         SCHEDULER_FACTOR=0.5,
         #DROPOUT_PROB=0.1,
         # Visualization
-        CHECKPOINT_INTERVAL=10,
+        CHECKPOINT_INTERVAL=5,
         DONT_PLOT_N_EPOCHS=0,
-        UMAP_NEIGHBORS=15,
-        UMAP_DOT_SIZE=30,
-        METRICS_ROLLING_WINDOW=20,
+        UMAP_NEIGHBORS=30,
+        UMAP_DOT_SIZE=20,
+        METRICS_ROLLING_WINDOW=10,
         # Data Parameters
         BATCH_SIZE=32,
         DIAGNOSES=["HC"], 
@@ -209,6 +210,7 @@ def main(atlas_name: str, num_epochs: int):
         scheduler_patience=config.SCHEDULER_PATIENCE,
         scheduler_factor=config.SCHEDULER_FACTOR,
         #use_ssim=config.USE_SSIM,
+        input_dim=len_atlas
     )
 
     if config.LOAD_MODEL:

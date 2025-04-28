@@ -57,7 +57,7 @@ class ContrastVAE_2D(nn.Module):
         contr_loss_weight,
         scaler,
         contr_temperature=0.1,
-        input_dim=100,  # Need to specify input dimension
+        input_dim:int = None,  # Need to specify input dimension
         hidden_dim_1=100,
         hidden_dim_2=100,
         latent_dim=20,

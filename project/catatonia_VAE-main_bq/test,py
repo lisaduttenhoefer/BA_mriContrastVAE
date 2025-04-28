@@ -1,0 +1,16 @@
+import os
+import pandas as pd
+
+def read_hdf5_to_df(filepath: str):
+    if not os.path.exists(filepath):
+        print(f"File {filepath} does not exist")
+        return None
+    try:
+        print("yay")
+        return pd.read_hdf(filepath, key='atlas_data')
+    except Exception as e:
+        print(f"Error reading {filepath}: {e}")
+        return None
+
+read_hdf5_to_df("/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data/train_xml_data/Aggregated_cobra.h5")
+

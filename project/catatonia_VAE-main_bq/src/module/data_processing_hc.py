@@ -248,6 +248,7 @@ def load_mri_data_2D(
 ) -> Tuple:
 
     atlas_data_path = f"{data_path}/Aggregated_{atlas_name}.h5"
+    #atlas_data_path = f"/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data/train_xml_data/Aggregated_cobra.h5"
 
     # If the CSV path is provided, check if the file exists, make sure that the annotations are not provided
     if csv_paths is not None:
@@ -312,19 +313,19 @@ def load_mri_data_2D(
     else:
         data = pd.read_csv(atlas_data_path, header=[0, 1], index_col=0)
 
-    if train_or_test == "train":
-            data.to_csv(f".data/train_processed_data/Proc_{atlas_name}.csv")
-            all_file_names = data.columns
-    else:
-        data.to_csv(f".data/test_processed_data/Proc_{atlas_name}.csv")
-        all_file_names = data.columns        
+    # if train_or_test == "train":
+    #     data.to_csv(f"/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data/train_processed_data/Proc_{atlas_name}.csv")
+    #     all_file_names = data.columns
+    # else:
+    #     data.to_csv(f"/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data/test_processed_data/Proc_{atlas_name}.csv")
+    #     all_file_names = data.columns        
         
-    data.set_index("Filename", inplace=True)
+    # data.set_index("Filename", inplace=True)
     data = normalize_and_scale_df(data)
 
     if save == True:
-        atlas_name = data_path.stem
-        data.to_csv(f"{config.PROCESSED_CSV_DIR}/Proc_{atlas_name}.csv")
+        #atlas_name = data_path.stem
+        data.to_csv(f"data/proc_extracted_xml_data/Proc_{atlas_name}_{train_or_test}.csv")
         
     all_file_names = data.columns
 
@@ -491,7 +492,7 @@ def load_mri_data_2D_all_atlases(
 
 def process_subjects(
     subjects: List[tio.Subject],
-    transforms: tio.Compose,
+   # transforms: tio.Compose,
     batch_size: int,
     shuffle_data: bool,
 ) -> DataLoader:
