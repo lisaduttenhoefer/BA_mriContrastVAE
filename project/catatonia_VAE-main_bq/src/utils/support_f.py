@@ -108,21 +108,29 @@ def read_hdf5_to_df_t(filepath: str):
 #             subset_df = df[df["Usage_original"] == option]
 #             subset_df.to_csv(path)
 #changed to hc/others split
+
+import pandas as pd
+import os
+
 def split_df(path_original: str, path_to_dir: str):
+    # Lade die ursprüngliche CSV-Datei
     df = pd.read_csv(path_original, header=[0])
-    df = df.drop(columns=["Unnamed: 0"])
+    df = df.drop(columns=["Unnamed: 0"])  # Entferne die unnötige Spalte
+
+    # Erstelle das Trainings-CSV für HC
+    path_hc = f"{path_to_dir}/hc_metadata.csv"
+    subset_hc = df[df["Diagnosis"] == "HC"]
+    subset_hc.to_csv(path_hc, index=False)  # Speichern ohne Index
     
-    for option in ["training", "testing"]:
-        if option == "training":
-            # Create HC subset
-            path_hc = f"{path_to_dir}/{option}_metadata.csv"
-            subset_hc = df[df["Diagnosis"] == "HC"]
-            subset_hc.to_csv(path_hc)
-        elif option == "testing":
-    # Create non-HC subset (everything else)
-            path_non_hc = f"{path_to_dir}/{option}_metadata.csv"
-            subset_non_hc = df[df["Diagnosis"] != "HC"]
-            subset_non_hc.to_csv(path_non_hc)
+    # Erstelle das Test-CSV für non-HC
+    path_non_hc = f"{path_to_dir}/non_hc_metadata.csv"
+    subset_non_hc = df[df["Diagnosis"] != "HC"]
+    subset_non_hc.to_csv(path_non_hc, index=False)  # Speichern ohne Index
+    
+    # Rückgabe der Pfade der erzeugten CSV-Dateien
+    return path_hc, path_non_hc
+
+
 
 
     

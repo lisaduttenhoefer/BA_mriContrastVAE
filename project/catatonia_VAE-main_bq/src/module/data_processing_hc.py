@@ -63,16 +63,32 @@ def get_atlas(path: pathlib.PosixPath) -> str:
         atlas = match.group(1)
     return atlas
 
+# def combine_dfs(paths: list):
+#     # Combines any number of csv files to a single pandas DataFrame, keeping only shared column indices. 
+#     for i in range(1,len(paths)):
+#         if i == 1: 
+#             joined_df = pd.read_csv(paths[i-1], header=[0], index_col=0)
+#             next_df = pd.read_csv(paths[i], header=[0], index_col=0)
+#             joined_df = pd.concat([joined_df, next_df], join="inner")  # Parameter "inner" keeps only the shared column indices.
+#         else:
+#             next_df = pd.read_csv(paths[i], header=[0], index_col=0)
+#             joined_df = pd.concat([joined_df, next_df], join="inner")
+#     return joined_df
+
 def combine_dfs(paths: list):
     # Combines any number of csv files to a single pandas DataFrame, keeping only shared column indices. 
-    for i in range(1,len(paths)):
-        if i == 1: 
-            joined_df = pd.read_csv(paths[i-1], header=[0], index_col=0)
-            next_df = pd.read_csv(paths[i], header=[0], index_col=0)
-            joined_df = pd.concat([joined_df, next_df], join="inner")  # Parameter "inner" keeps only the shared column indices.
-        else:
-            next_df = pd.read_csv(paths[i], header=[0], index_col=0)
-            joined_df = pd.concat([joined_df, next_df], join="inner")
+    
+    if len(paths) > 1: 
+        for i in range(1,len(paths)):
+            if i == 1: 
+                joined_df = pd.read_csv(paths[i-1], header=[0])
+                next_df = pd.read_csv(paths[i], header=[0])
+                joined_df = pd.concat([joined_df, next_df], join="inner")  # Parameter "inner" keeps only the shared column indices.
+            else:
+                next_df = pd.read_csv(paths[i], header=[0])
+                joined_df = pd.concat([joined_df, next_df], join="inner")
+    else: 
+        joined_df = pd.read_csv(paths[0], header=[0])
     return joined_df
 
 
@@ -295,13 +311,15 @@ def load_mri_data_2D(
         data = read_hdf5_to_df(filepath=atlas_data_path)
     else:
         data = pd.read_csv(atlas_data_path, header=[0, 1], index_col=0)
-    if train:
+
+    if train_or_test == "train":
             data.to_csv(f".data/train_processed_data/Proc_{atlas_name}.csv")
             all_file_names = data.columns
     else:
         data.to_csv(f".data/test_processed_data/Proc_{atlas_name}.csv")
         all_file_names = data.columns        
-    # data.set_index("Filename", inplace=True)
+        
+    data.set_index("Filename", inplace=True)
     data = normalize_and_scale_df(data)
 
     if save == True:

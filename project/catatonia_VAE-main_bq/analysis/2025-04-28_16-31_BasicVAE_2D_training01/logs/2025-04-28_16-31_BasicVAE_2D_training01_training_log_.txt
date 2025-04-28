@@ -1,0 +1,73 @@
+2025-04-28 14:31:43 - INFO - Starting new training session
+2025-04-28 14:31:43 - INFO - Configuration:
+2025-04-28 14:31:43 - INFO - LEARNING_RATE: 1e-05
+2025-04-28 14:31:43 - INFO - WEIGHT_DECAY: 0.001
+2025-04-28 14:31:43 - INFO - BATCH_SIZE: 32
+2025-04-28 14:31:43 - INFO - LATENT_DIM: 20
+2025-04-28 14:31:43 - INFO - CONTR_LOSS_WEIGHT: 0.0
+2025-04-28 14:31:43 - INFO - RECON_LOSS_WEIGHT: 5.0
+2025-04-28 14:31:43 - INFO - KLDIV_LOSS_WEIGHT: 1.0
+2025-04-28 14:31:43 - INFO - ADVER_LR: None
+2025-04-28 14:31:43 - INFO - CLASS_LOSS_WEIGHT: None
+2025-04-28 14:31:43 - INFO - CONTRAST_TEMPERATURE: None
+2025-04-28 14:31:43 - INFO - TOTAL_EPOCHS: 10
+2025-04-28 14:31:43 - INFO - CHECKPOINT_INTERVAL: 10
+2025-04-28 14:31:43 - INFO - DIAGNOSES: ['HC']
+2025-04-28 14:31:43 - INFO - UMAP_NEIGHBORS: 15
+2025-04-28 14:31:43 - INFO - SHUFFLE_DATA: False
+2025-04-28 14:31:43 - INFO - SEED: 123
+2025-04-28 14:31:43 - INFO - START_EPOCH: 0
+2025-04-28 14:31:43 - INFO - DROPOUT_PROB: 0.1
+2025-04-28 14:31:43 - INFO - USE_SSIM: False
+2025-04-28 14:31:43 - INFO - SCHEDULE_ON_VALIDATION: False
+2025-04-28 14:31:43 - INFO - SCHEDULER_PATIENCE: 10
+2025-04-28 14:31:43 - INFO - SCHEDULER_FACTOR: 0.5
+2025-04-28 14:31:43 - INFO - EARLY_STOPPING: True
+2025-04-28 14:31:43 - INFO - STOP_LEARNING_RATE: 1e-07
+2025-04-28 14:31:43 - INFO - DEVICE: cuda:1
+2025-04-28 14:31:43 - INFO - TIMESTAMP: 2025-04-28_16-31
+2025-04-28 14:31:43 - INFO - DONT_PLOT_N_EPOCHS: 0
+2025-04-28 14:31:43 - INFO - METRICS_ROLLING_WINDOW: 20
+2025-04-28 14:31:43 - INFO - UMAP_DOT_SIZE: 30
+2025-04-28 14:31:43 - INFO - LOAD_MODEL: False
+2025-04-28 14:31:43 - INFO - PRETRAIN_MODEL_PATH: None
+2025-04-28 14:31:43 - INFO - PRETRAIN_METRICS_PATH: None
+2025-04-28 14:31:43 - INFO - FINAL_EPOCH: 10
+2025-04-28 14:31:43 - INFO - OUTPUT_DIR: /raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/analysis/2025-04-28_16-31_BasicVAE_2D_training01
+2025-04-28 14:31:43 - INFO - TRAIN_CSV:                  Filename Dataset Diagnosis   Age     Sex Usage_original  Sex_int
+0      IXI426-IOP-1011-T1     IXI        HC  41.2  Female       training        0
+1      IXI571-IOP-1154-T1     IXI        HC  56.6  Female       training        0
+2     IXI170-Guys-0843-T1     IXI        HC  50.2  Female       training        0
+3     IXI054-Guys-0707-T1     IXI        HC  60.8  Female       training        0
+4     IXI196-Guys-0805-T1     IXI        HC  47.8  Female       training        0
+...                   ...     ...       ...   ...     ...            ...      ...
+2599        CC5111_0_MPR1      NU        HC   0.0    Male        testing        1
+2603        CC1085_0_MPR1      NU        HC   0.0    Male        testing        1
+2609       CC0475_24_MPR1      NU        HC   0.0    Male        testing        1
+2611       NM2106_48_MPR1      NU        HC   0.0  Female        testing        0
+2612        CC3037_0_MPR1      NU        HC   0.0    Male        testing        1
+
+[1667 rows x 7 columns]
+2025-04-28 14:31:43 - INFO - ADVER_CSV: None
+2025-04-28 14:31:43 - INFO - MRI_DATA_PATH: /raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data/train_xml_data_t
+2025-04-28 14:31:43 - INFO - PROC_DATA_PATH: /raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data_training/proc_extracted_xml_data
+2025-04-28 14:31:43 - INFO - ATLAS_NAME: cobra
+2025-04-28 14:31:43 - INFO - TEST_CSV:                    Filename Dataset Diagnosis   Age     Sex Usage_original  Sex_int
+1121               sub-0263   SRBPS       MDD  47.0  Female       training        0
+1122               sub-1188   SRBPS       MDD  29.0  Female       training        0
+1123               sub-1178   SRBPS       MDD  23.0  Female       training        0
+1124               sub-1148   SRBPS       MDD  27.0  Female       training        0
+1125               sub-0377   SRBPS       MDD  47.0  Female       training        0
+...                     ...     ...       ...   ...     ...            ...      ...
+2887  sub-NSS126_ses-01_T1w     NSS      SCHZ  37.0  Female        testing        0
+2888  sub-NSS127_ses-01_T1w     NSS      SCHZ  28.0  Female        testing        0
+2889  sub-NSS128_ses-01_T1w     NSS      SCHZ  44.0    Male        testing        1
+2890  sub-NSS129_ses-01_T1w     NSS       CTT  41.0  Female        testing        0
+2891  sub-NSS130_ses-01_T1w     NSS      SCHZ  39.0  Female        testing        0
+
+[1225 rows x 7 columns]
+2025-04-28 14:31:43 - INFO - RUN_NAME: BasicVAE_2D_training01
+2025-04-28 14:31:43 - INFO - FIGURES_DIR: /raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/analysis/2025-04-28_16-31_BasicVAE_2D_training01/figures
+2025-04-28 14:31:43 - INFO - LOGGING_DIR: /raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/analysis/2025-04-28_16-31_BasicVAE_2D_training01/logs
+2025-04-28 14:31:43 - INFO - DATA_DIR: /raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/analysis/2025-04-28_16-31_BasicVAE_2D_training01/data
+2025-04-28 14:31:43 - INFO - MODEL_DIR: /raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/analysis/2025-04-28_16-31_BasicVAE_2D_training01/models

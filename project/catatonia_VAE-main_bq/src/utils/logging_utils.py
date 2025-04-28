@@ -239,6 +239,7 @@ def end_logging(config: Config_2D):
     *    ,'|  |  |`.   *
          / |  |  |  \    *
     *   |,-'--|--'-. |
+    
     """
     print(rocket_art)
     print("")

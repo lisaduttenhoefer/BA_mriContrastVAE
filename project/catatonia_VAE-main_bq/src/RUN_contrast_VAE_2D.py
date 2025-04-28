@@ -12,7 +12,7 @@ from torch.cuda.amp import GradScaler
 
 sys.path.append("../src")
 from models.ContrastVAE_2D_f import ContrastVAE_2D, train_ContrastVAE_2D
-from utils.support_f import get_all_data, split_df
+from utils.support_f import get_all_data, split_df, combine_dfs
 from utils.config_utils_model import Config_2D
 
 from module.data_processing_hc import (load_checkpoint_model, load_mri_data_2D, process_subjects, train_val_split_annotations,train_val_split_subjects
@@ -35,7 +35,9 @@ def create_arg_parser():  # For training several different models with run_train
     parser.add_argument('--num_epochs', help='Number of epochs to be trained for')
     return parser
 
-
+path_original = "/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/metadata_20250110/full_data_train_valid_test.csv"
+path_to_dir = "/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data_training"
+TRAIN_CSV, TEST_CSV = split_df(path_original, path_to_dir)
 
 def main(atlas_name: str, num_epochs: int):
     ## 0. Set Up ----------------------------------------------------------
@@ -43,21 +45,18 @@ def main(atlas_name: str, num_epochs: int):
     # Config has default parameters you may want to check
 
     # Split the original metadata csv file that contains all data into two separate ones: training metadata and testing metadata.
-    split_df(path_original="/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/metadata_20250110/full_data_train_valid_test.csv",
-             path_to_dir="/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data_training")
-
+    
     
     config = Config_2D(
         # General Parameters
         RUN_NAME="BasicVAE_2D_training01",
         # Input / Output Paths
-        TRAIN_CSV="/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data_training/hc_metadata.csv", # TEST_CSV=["./data/relevant_metadata/testing_metadata.csv"],
-        TEST_CSV="/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data_training/non_hc_metadata.csv",
-        MRI_DATA_PATH="data/augmented", #"./data/raw_extracted_xml_data/train_xml_data", # This is the h5 file!
-        #PROC_DATA_PATH="./data/proc_extracted_xml_data",
+        TRAIN_CSV= ["/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data_training/training_metadata.csv"], #"/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data_training/hc_metadata.csv", # TEST_CSV=["./data/relevant_metadata/testing_metadata.csv"],
+        TEST_CSV= ["/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data_training/testing_metadata.csvs"], #"/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data_training/non_hc_metadata.csv",
+        MRI_DATA_PATH="/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data/train_xml_data_t", #"./data/raw_extracted_xml_data/train_xml_data", # This is the h5 file!
         ATLAS_NAME=atlas_name,
-        PROC_DATA_PATH="./data/proc_extracted_xml_data",
-        OUTPUT_DIR="./analysis",
+        PROC_DATA_PATH="/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data_training/proc_extracted_xml_data",
+        OUTPUT_DIR="/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/analysis",
         # Loading Model
         LOAD_MODEL=False,
         PRETRAIN_MODEL_PATH=None,
