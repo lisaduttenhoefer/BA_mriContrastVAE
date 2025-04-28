@@ -13,7 +13,7 @@ import seaborn as sns
 import torchio as tio
 from torch.utils.data import DataLoader
 
-from utils.data_processing import load_mri_data
+from module.data_processing_hc import load_mri_data_2D
 from utils.logging_utils import log_and_print
 
 """

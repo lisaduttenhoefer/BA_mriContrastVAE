@@ -32,10 +32,11 @@ config = Config_2D(
     # General Parameters
     RUN_NAME="BasicVAE_training",
     # Input / Output Paths
-    TRAIN_CSV="data/aug_train.csv",
-    VALID_CSV="data/aug_valid.csv",
-    MRI_DATA_PATH="data/augmented",
+    TRAIN_CSV="data/aug_train.csv", # TEST_CSV=["./data/relevant_metadata/testing_metadata.csv"],
+    VALID_CSV="data/aug_valid.csv", #["./data/relevant_metadata/training_metadata.csv"]
+    MRI_DATA_PATH="data/augmented", #"./data/raw_extracted_xml_data/train_xml_data", # This is the h5 file!
     #PROC_DATA_PATH="./data/proc_extracted_xml_data",
+    PROC_DATA_PATH="./data/proc_extracted_xml_data",
     OUTPUT_DIR="analysis",
     # Loading Model
     LOAD_MODEL=False,
@@ -58,11 +59,11 @@ config = Config_2D(
     SCHEDULER_FACTOR=0.5,
     DROPOUT_PROB=0.1,
     # Visualization
-    CHECKPOINT_INTERVAL=5,
+    CHECKPOINT_INTERVAL=10,
     DONT_PLOT_N_EPOCHS=0,
-    UMAP_NEIGHBORS=20,
-    UMAP_DOT_SIZE=20,
-    METRICS_ROLLING_WINDOW=10,
+    UMAP_NEIGHBORS=15,
+    UMAP_DOT_SIZE=30,
+    METRICS_ROLLING_WINDOW=20,
     # Data Parameters
     BATCH_SIZE=32,
     DIAGNOSES=["CTT", "HC", "MDD", "SCHZ"],

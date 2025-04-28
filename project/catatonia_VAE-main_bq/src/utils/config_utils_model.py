@@ -57,6 +57,8 @@ class Config_2D:
         RUN_NAME: str,
         # The path to the csv files (contains metadata and filenames of MRI .nii files)
         TRAIN_CSV: List[str],
+        
+        #VALID_CSV: List[str],
         # The paths to the csv files that contain metadata for the testing data
         TEST_CSV: List[str],
         # Name of atlas which should be used for training of the model

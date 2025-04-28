@@ -3,7 +3,7 @@ import os
 from datetime import datetime, timedelta
 from typing import Dict
 
-from utils.config_utils_prep import Config
+from utils.config_utils_model import Config_2D
 
 
 def log_and_print(message: str):
@@ -14,7 +14,7 @@ def log_and_print(message: str):
     print(message)
 
 
-def setup_logging(config: Config):
+def setup_logging(config: Config_2D):
     """
     Set up logging for the training session.
 
@@ -208,7 +208,7 @@ def log_early_stopping(
     print()
 
 
-def end_logging(config: Config):
+def end_logging(config: Config_2D):
     end_messsage = f"Training session completed at {datetime.now()+timedelta(hours=2)}."
 
     logging.info(end_messsage)
@@ -229,15 +229,16 @@ def end_logging(config: Config):
     print("")
 
     rocket_art = r"""
+
     *      *  |    *
       *      / \     * 
     *    *  / _ \  *    *
            |.o '.|  *
-      *    |'._.'|
+      *    |'._.'|         done :) 
          * |     |  *   *
-    *    ,'|  | |`.   *
-         /  |  | |  \    *
-    *   |,-'--|--'-.|
+    *    ,'|  |  |`.   *
+         / |  |  |  \    *
+    *   |,-'--|--'-. |
     """
     print(rocket_art)
     print("")
