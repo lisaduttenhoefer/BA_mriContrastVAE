@@ -127,6 +127,21 @@ class Config_2D:
         DEVICE: torch.device = None,
         # A timestamp for the run. If None, the current time will be used. Timestamp will be in output directory name.
         TIMESTAMP: str = None,
+
+        TRAINED_MODEL_PATH: str, 
+        BLR_TEST_SIZE: int = 0.2,
+        BLR_RANDOM_SEED: int = 42, 
+        BLR_COVARIATES: ["Age", "Sex"],
+        STANDARIZE_FEATURES: bool = True,
+        ROI_COLUMNS: List[str],
+        VIS_TOP_ROIS: int=15 ,
+        VIS_SCATTER_ROIS: int=5 , 
+        VIS_FIG_LARGE: List[14, 10],
+        VIS_FIG_MEDIUM: List[12, 8] ,
+        VIS_FIG_SMALL: List[10,6], 
+        COLOR_PALETTE: "coolwarm"
+
+
     ):
 
         # set up training parameters ------------------------------------------------

@@ -1,5 +1,5 @@
 import sys
-
+sys.path.append("/home/developer/.local/lib/python3.10/site-packages")
 import matplotlib
 import numpy as np
 import pandas as pd
@@ -53,8 +53,9 @@ def main(atlas_name: str, num_epochs: int):
         RUN_NAME="BasicVAE_2D_training01",
         # Input / Output Paths
         TRAIN_CSV= ["/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data_training/training_metadata.csv"], #"/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data_training/hc_metadata.csv", # TEST_CSV=["./data/relevant_metadata/testing_metadata.csv"],
-        TEST_CSV= ["/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data_training/testing_metadata.csvs"], #"/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data_training/non_hc_metadata.csv",
+        TEST_CSV= ["/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data_training/s"], #"/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data_training/non_hc_metadata.csv",
         MRI_DATA_PATH="/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data/train_xml_data", #"./data/raw_extracted_xml_data/train_xml_data", # This is the h5 file!
+        METADATA_WHOLE = "/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/metadata_20250110/full_data_train_valid_test.csv"
         ATLAS_NAME=atlas_name,
         PROC_DATA_PATH="/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data_training/proc_extracted_xml_data",
         OUTPUT_DIR="/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/analysis",

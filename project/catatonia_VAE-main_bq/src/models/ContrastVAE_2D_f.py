@@ -417,6 +417,16 @@ def train_ContrastVAE_2D(
         model_metrics = update_performance_metrics(model_metrics, [train_metrics, valid_metrics])
         
         # Handle checkpoint operations
+         
+        #  # report accuracy to Ray Tune for hyperparameter tuning
+        # if accuracy_tune:
+        #     train.report({"accuracy": model_metrics["accuracy"].max()})
+
+        # # If we're going to stop training early, we need to do a checkpoint
+        # if config.EARLY_STOPPING:
+        #     if model_metrics["learning_rate"].iloc[-1] <= config.STOP_LEARNING_RATE:
+        #         is_checkpoint = True
+
         if is_checkpoint:
 
             if not no_plotting:
@@ -574,7 +584,7 @@ def train_ContrastVAE_2D(
             save_path=config.MODEL_DIR,
             timestamp=config.TIMESTAMP,
             descriptor=config.RUN_NAME,
-            epoch=epoch,
+            #epoch=epoch,
         )
     
     # Log best accuracy

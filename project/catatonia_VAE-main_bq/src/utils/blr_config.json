@@ -1,0 +1,47 @@
+{   
+    "data_path": "/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data/train_xml_data",
+    "trained_model_path": "/path/to/your/trained_model.pth",
+    
+    "model": {
+        "input_dim": 128,
+        "hidden_dim": 64,
+        "latent_dim": 16,
+        "contrast_dim": 2
+    },
+    
+    "blr_analysis": {
+        "test_size": 0.2,
+        "random_seed": 42,
+        "covariates": ["age", "sex", "site"],
+        "standardize_features": true
+    },
+    
+    "roi_columns": [
+        "Left-Lateral-Ventricle", "Left-Inf-Lat-Vent", "Left-Cerebellum-White-Matter", 
+        "Left-Cerebellum-Cortex", "Left-Thalamus-Proper", "Left-Caudate", "Left-Putamen", 
+        "Left-Pallidum", "3rd-Ventricle", "4th-Ventricle", "Brain-Stem", 
+        "Left-Hippocampus", "Left-Amygdala", "CSF", "Left-Accumbens-area", 
+        "Left-VentralDC", "Left-vessel", "Left-choroid-plexus", 
+        "Right-Lateral-Ventricle", "Right-Inf-Lat-Vent", "Right-Cerebellum-White-Matter", 
+        "Right-Cerebellum-Cortex", "Right-Thalamus-Proper", "Right-Caudate", 
+        "Right-Putamen", "Right-Pallidum", "Right-Hippocampus", "Right-Amygdala", 
+        "Right-Accumbens-area", "Right-VentralDC", "Right-vessel", "Right-choroid-plexus", 
+        "5th-Ventricle", "WM-hypointensities", "Left-WM-hypointensities", 
+        "Right-WM-hypointensities", "non-WM-hypointensities", "Left-non-WM-hypointensities", 
+        "Right-non-WM-hypointensities", "Optic-Chiasm", "CC_Posterior", "CC_Mid_Posterior", 
+        "CC_Central", "CC_Mid_Anterior", "CC_Anterior"
+    ],
+    
+    "covariate_columns": ["age", "sex", "site"],
+    
+    "visualization": {
+        "plot_top_n_rois": 15,
+        "scatter_rois": 5,
+        "figure_size": {
+            "large": [14, 10],
+            "medium": [12, 8],
+            "small": [10, 6]
+        },
+        "color_palette": "coolwarm"
+    }
+}
