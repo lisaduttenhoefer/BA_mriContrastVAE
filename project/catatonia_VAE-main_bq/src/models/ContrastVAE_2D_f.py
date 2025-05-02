@@ -141,6 +141,13 @@ class ContrastVAE_2D(nn.Module):
         
         # Initialize weights
         self.apply(self.weights_init)
+        ##?
+        def _init_weights(self, module):
+            """Initialize weights for linear layers"""
+            if isinstance(module, nn.Linear):
+                nn.init.xavier_uniform_(module.weight)
+                if module.bias is not None:
+                    nn.init.constant_(module.bias, 0)
     
     def reparameterize(self, mu, logvar):
         # self: The latent space produced by the encode
@@ -176,6 +183,29 @@ class ContrastVAE_2D(nn.Module):
         
         return mu
     
+    ###
+    def reconstruct(self, x):
+        """Rekonstruiere einen Input"""
+        self.eval()
+        with torch.no_grad():
+            recon, _, _ = self(x)
+        return recon
+    
+    def loss_function(self, recon_x, x, mu, logvar):
+        """VAE-Loss-Funktion mit Rekonstruktionsfehler und KL-Divergenz"""
+        # Rekonstruktionsloss (MSE)
+        recon_loss = F.mse_loss(recon_x, x, reduction="mean")
+        
+        # KL-Divergenz
+        kldiv_loss = -0.5 * torch.mean(1 + logvar - mu.pow(2) - logvar.exp())
+        kldiv_loss = kldiv_loss * self.kldiv_loss_weight
+        
+        # Gesamtloss
+        total_loss = recon_loss + kldiv_loss
+        
+        return total_loss, recon_loss, kldiv_loss
+
+    ###
     def train_one_epoch(self, train_loader: DataLoader, epoch: int) -> Dict[str, float]:
         """Train for one epoch"""
         # Set to train mode
@@ -307,6 +337,17 @@ class ContrastVAE_2D(nn.Module):
         
         return epoch_metrics
     
+    ###
+    @torch.no_grad()
+    def compute_reconstruction_error(self, x):
+        """Berechne den Rekonstruktionsfehler für ein Sample"""
+        self.eval()
+        x = x.to(self.device)
+        recon_x, _, _ = self(x)
+        # Berechne MSE für jedes Feature
+        recon_error = (x - recon_x).pow(2)
+        return recon_error
+    ###
     @torch.no_grad()
     def extract_latent_space(self, data_loader, data_type):
         """Extract latent space representations"""
@@ -341,6 +382,7 @@ class ContrastVAE_2D(nn.Module):
         elif isinstance(param, nn.Linear):                 # if the parameter is a linear layer, use Xavier Uniform initialization
             nn.init.xavier_uniform_(param.weight)
             nn.init.constant_(param.bias, 0)
+            
     def combined_loss_function(self, recon_measurements, meas, mu, log_var, labels):
         """Calculate combined loss"""
         # Contrastive loss
@@ -486,7 +528,7 @@ def train_ContrastVAE_2D(
                     save_path=config.FIGURES_DIR,
                     timestamp=config.TIMESTAMP,
                     save=True,
-                    show=False,
+                    show=True,
                 )
 
                 # plot latent space umap with detailed annotations -> combined & alone

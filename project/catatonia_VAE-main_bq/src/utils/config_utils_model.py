@@ -65,7 +65,9 @@ class Config_2D:
         # The path to the folder where intermediate normalitzed and scaled data should be saved
         PROC_DATA_PATH: str,
         # The path to the directory that contains the MRI .nii files
-        MRI_DATA_PATH: str,
+        #MRI_DATA_PATH: str, ####
+        MRI_DATA_PATH_TRAIN: str,
+        MRI_DATA_PATH_TEST: str,
         # The folder in which a training specific output directory should be created
         OUTPUT_DIR: str,
         # The column names, from the CSVs, that contain the covariates that you want to be attached to the Subject objects
@@ -128,18 +130,18 @@ class Config_2D:
         # A timestamp for the run. If None, the current time will be used. Timestamp will be in output directory name.
         TIMESTAMP: str = None,
 
-        TRAINED_MODEL_PATH: str, 
-        BLR_TEST_SIZE: int = 0.2,
-        BLR_RANDOM_SEED: int = 42, 
-        BLR_COVARIATES: ["Age", "Sex"],
-        STANDARIZE_FEATURES: bool = True,
-        ROI_COLUMNS: List[str],
-        VIS_TOP_ROIS: int=15 ,
-        VIS_SCATTER_ROIS: int=5 , 
-        VIS_FIG_LARGE: List[14, 10],
-        VIS_FIG_MEDIUM: List[12, 8] ,
-        VIS_FIG_SMALL: List[10,6], 
-        COLOR_PALETTE: "coolwarm"
+        # TRAINED_MODEL_PATH: str = None, 
+        # BLR_TEST_SIZE: int = 0.2,
+        # BLR_RANDOM_SEED: int = 42, 
+        # BLR_COVARIATES: List["Age", "Sex"],
+        # STANDARIZE_FEATURES: bool = True,
+        # ROI_COLUMNS: List[str],
+        # VIS_TOP_ROIS: int=15 ,
+        # VIS_SCATTER_ROIS: int=5 , 
+        # VIS_FIG_LARGE: List[14, 10],
+        # VIS_FIG_MEDIUM: List[12, 8] ,
+        # VIS_FIG_SMALL: List[10,6], 
+        # COLOR_PALETTE: str = "coolwarm"
 
 
     ):
@@ -212,7 +214,7 @@ class Config_2D:
         self.FINAL_EPOCH = self.START_EPOCH + self.TOTAL_EPOCHS
 
         # check that all other paths exist
-        for path in [ADVER_CSV, MRI_DATA_PATH, OUTPUT_DIR]:
+        for path in [ADVER_CSV, MRI_DATA_PATH_TRAIN, MRI_DATA_PATH_TEST, OUTPUT_DIR]:
             if path is not None:
                 assert os.path.exists(path), f"Path {path} does not exist"
 
@@ -220,7 +222,8 @@ class Config_2D:
         self.OUTPUT_DIR = OUTPUT_DIR
         self.TRAIN_CSV = TRAIN_CSV
         self.ADVER_CSV = ADVER_CSV
-        self.MRI_DATA_PATH = MRI_DATA_PATH
+        self.MRI_DATA_PATH_TRAIN = MRI_DATA_PATH_TRAIN
+        self.MRI_DATA_PATH_TEST = MRI_DATA_PATH_TEST
         self.PROC_DATA_PATH = PROC_DATA_PATH
         self.ATLAS_NAME = ATLAS_NAME
         self.TEST_CSV = TEST_CSV

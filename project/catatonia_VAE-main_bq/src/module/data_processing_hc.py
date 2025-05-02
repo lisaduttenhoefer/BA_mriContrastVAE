@@ -22,33 +22,67 @@ def flatten_array(df: pd.DataFrame) -> np.ndarray:
     return flat_array
 
 
-def normalize_and_scale_df(df: pd.DataFrame) -> pd.DataFrame:
-    # Normalizes the columns (patient volumes) by Min-Max Scaling and scales the rows (ROIs) with Z-transformation.
+# def normalize_and_scale_df(df: pd.DataFrame) -> pd.DataFrame:
+#     # Normalizes the columns (patient volumes) by Min-Max Scaling and scales the rows (ROIs) with Z-transformation.
 
+#     df_copy = df.copy()
+#     column_sums = df_copy.sum()
+    
+#     # Apply the formula: ln((10000*value)/sum_values + 1) "Log transformation"
+#     # Alternatively for Min-Max Scaling: df_copy/df_copy.max() - Problem: Some rows have std = 0
+#     transformed_df = np.log((10000 * df_copy) / column_sums + 1)
+    
+#     norm_copy = transformed_df.copy()
+
+#     cols = norm_copy.columns.get_level_values(-1).tolist()
+#     unique_cols = list(set(cols))
+
+#     for col_type in unique_cols:
+#         cols_to_scale = [col for col in norm_copy.columns if col[-1] == col_type]
+
+#         # Scale the selected columns per row
+#         scaled = norm_copy[cols_to_scale].apply(
+#             lambda row: (row - row.mean()) / row.std() if row.std() > 0 else pd.Series(0.0, index=row.index),
+#             axis=1
+#         )
+        
+#         norm_copy.loc[:, cols_to_scale] = scaled
+        
+#     return norm_copy
+
+def normalize_and_scale_df(df: pd.DataFrame, ticv_column=None) -> pd.DataFrame:
+    """
+    Normalizes brain region volumes using the described preprocessing approach:
+    1. Calculate relative volumes by dividing by total intracranial volume (if provided)
+    2. Perform robust normalization: (x - median) / IQR for each brain region
+    """
     df_copy = df.copy()
-    column_sums = df_copy.sum()
     
-    # Apply the formula: ln((10000*value)/sum_values + 1) "Log transformation"
-    # Alternatively for Min-Max Scaling: df_copy/df_copy.max() - Problem: Some rows have std = 0
-    transformed_df = np.log((10000 * df_copy) / column_sums + 1)
-    
-    norm_copy = transformed_df.copy()
+    if ticv_column is not None:
+        ticv_values = df_copy[ticv_column]
+        if ticv_column in df_copy.columns:
+            df_copy = df_copy.drop(columns=[ticv_column])
+        for column in df_copy.columns:
+            df_copy[column] = df_copy[column] / ticv_values
 
-    cols = norm_copy.columns.get_level_values(-1).tolist()
-    unique_cols = list(set(cols))
+    # Use a dictionary to store normalized columns
+    normalized_data = {}
 
-    for col_type in unique_cols:
-        cols_to_scale = [col for col in norm_copy.columns if col[-1] == col_type]
+    for column in df_copy.columns:
+        median_value = df_copy[column].median()
+        q1 = df_copy[column].quantile(0.25)
+        q3 = df_copy[column].quantile(0.75)
+        iqr = q3 - q1
 
-        # Scale the selected columns per row
-        scaled = norm_copy[cols_to_scale].apply(
-            lambda row: (row - row.mean()) / row.std() if row.std() > 0 else pd.Series(0.0, index=row.index),
-            axis=1
-        )
-        
-        norm_copy.loc[:, cols_to_scale] = scaled
-        
-    return norm_copy
+        if iqr == 0:
+            normalized_data[column] = pd.Series(0, index=df_copy.index)
+        else:
+            normalized_data[column] = (df_copy[column] - median_value) / iqr
+
+    # Create the final normalized DataFrame at once
+    normalized_df = pd.DataFrame(normalized_data, index=df_copy.index)
+
+    return normalized_df
 
 
 def get_all_data(directory: str, ext: str = "h5") -> list:
@@ -321,6 +355,7 @@ def load_mri_data_2D(
     #     all_file_names = data.columns        
         
     # data.set_index("Filename", inplace=True)
+
     data = normalize_and_scale_df(data)
 
     if save == True:
@@ -372,7 +407,7 @@ def load_mri_data_2D_all_atlases(
     diagnoses = None,
     covars = [],
     hdf5: bool = True,
-    train_or_test: str = "train"
+    train_or_test: str = None
 ) -> Tuple:
     print("test 1")
 
@@ -445,11 +480,11 @@ def load_mri_data_2D_all_atlases(
         data = normalize_and_scale_df(data)
         atlas_name = data_path.stem
 
-        if train:
-            data.to_csv(f".data/train_processed_data/Proc_{atlas_name}.csv")
+        if train_or_test == "train":
+            data.to_csv(f"/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/normative_results/train_processed_data_norm/Proc_{atlas_name}.csv")
             all_file_names = data.columns
         else:
-            data.to_csv(f".data/test_processed_data/Proc_{atlas_name}.csv")
+            data.to_csv(f"/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/normative_results/test_processed_data_norm/Proc_{atlas_name}.csv")
             all_file_names = data.columns
         #data.to_csv(f"data/proc_extracted_xml_data/Proc_{atlas_name}_{train_or_test}.csv")
         all_file_names = data.columns
@@ -468,9 +503,9 @@ def load_mri_data_2D_all_atlases(
             else:
                 file_name = row["Filename"]
 
-            # if file_name in subjects: 
-            #     if data_path in subjects[file_name]["measurements"]:
-            #         continue
+            if file_name in subjects: 
+                if data_path in subjects[file_name]["measurements"]:
+                    continue
 
             patient_data = data[file_name]
             flat_patient_data = flatten_array(patient_data).tolist()

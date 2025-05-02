@@ -55,7 +55,7 @@ def main(atlas_name: str, num_epochs: int):
         TRAIN_CSV= ["/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data_training/training_metadata.csv"], #"/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data_training/hc_metadata.csv", # TEST_CSV=["./data/relevant_metadata/testing_metadata.csv"],
         TEST_CSV= ["/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data_training/s"], #"/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data_training/non_hc_metadata.csv",
         MRI_DATA_PATH="/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data/train_xml_data", #"./data/raw_extracted_xml_data/train_xml_data", # This is the h5 file!
-        METADATA_WHOLE = "/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/metadata_20250110/full_data_train_valid_test.csv"
+        METADATA_WHOLE = "/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/metadata_20250110/full_data_train_valid_test.csv",
         ATLAS_NAME=atlas_name,
         PROC_DATA_PATH="/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data_training/proc_extracted_xml_data",
         OUTPUT_DIR="/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/analysis",
@@ -67,7 +67,7 @@ def main(atlas_name: str, num_epochs: int):
         # Loss Parameters
         RECON_LOSS_WEIGHT=40.0,
         KLDIV_LOSS_WEIGHT=4.0,
-        CONTR_LOSS_WEIGHT=4.0,  # if not zero, you're not running basicVAE
+        CONTR_LOSS_WEIGHT=0.0,  # if not zero, you're not running basicVAE
         #USE_SSIM=True,
         # Learning and Regularization
         TOTAL_EPOCHS=num_epochs,
