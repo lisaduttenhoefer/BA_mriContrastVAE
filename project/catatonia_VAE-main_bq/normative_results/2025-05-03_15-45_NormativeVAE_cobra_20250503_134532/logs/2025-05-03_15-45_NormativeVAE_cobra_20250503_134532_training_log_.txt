@@ -1,0 +1,52 @@
+2025-05-03 13:45:34 - INFO - Starting new training session
+2025-05-03 13:45:34 - INFO - Configuration:
+2025-05-03 13:45:34 - INFO - LEARNING_RATE: 4e-05
+2025-05-03 13:45:34 - INFO - WEIGHT_DECAY: 0.004
+2025-05-03 13:45:34 - INFO - BATCH_SIZE: 32
+2025-05-03 13:45:34 - INFO - LATENT_DIM: 20
+2025-05-03 13:45:34 - INFO - CONTR_LOSS_WEIGHT: 0.0
+2025-05-03 13:45:34 - INFO - RECON_LOSS_WEIGHT: 40.0
+2025-05-03 13:45:34 - INFO - KLDIV_LOSS_WEIGHT: 4.0
+2025-05-03 13:45:34 - INFO - ADVER_LR: None
+2025-05-03 13:45:34 - INFO - CLASS_LOSS_WEIGHT: None
+2025-05-03 13:45:34 - INFO - CONTRAST_TEMPERATURE: None
+2025-05-03 13:45:34 - INFO - TOTAL_EPOCHS: 5
+2025-05-03 13:45:34 - INFO - CHECKPOINT_INTERVAL: 5
+2025-05-03 13:45:34 - INFO - DIAGNOSES: ['HC']
+2025-05-03 13:45:34 - INFO - UMAP_NEIGHBORS: 30
+2025-05-03 13:45:34 - INFO - SHUFFLE_DATA: True
+2025-05-03 13:45:34 - INFO - SEED: 42
+2025-05-03 13:45:34 - INFO - START_EPOCH: 0
+2025-05-03 13:45:34 - INFO - DROPOUT_PROB: 0.1
+2025-05-03 13:45:34 - INFO - USE_SSIM: False
+2025-05-03 13:45:34 - INFO - SCHEDULE_ON_VALIDATION: True
+2025-05-03 13:45:34 - INFO - SCHEDULER_PATIENCE: 6
+2025-05-03 13:45:34 - INFO - SCHEDULER_FACTOR: 0.5
+2025-05-03 13:45:34 - INFO - EARLY_STOPPING: True
+2025-05-03 13:45:34 - INFO - STOP_LEARNING_RATE: 4e-08
+2025-05-03 13:45:34 - INFO - DEVICE: cuda:1
+2025-05-03 13:45:34 - INFO - TIMESTAMP: 2025-05-03_15-45
+2025-05-03 13:45:34 - INFO - DONT_PLOT_N_EPOCHS: 0
+2025-05-03 13:45:34 - INFO - METRICS_ROLLING_WINDOW: 10
+2025-05-03 13:45:34 - INFO - UMAP_DOT_SIZE: 20
+2025-05-03 13:45:34 - INFO - LOAD_MODEL: False
+2025-05-03 13:45:34 - INFO - PRETRAIN_MODEL_PATH: None
+2025-05-03 13:45:34 - INFO - PRETRAIN_METRICS_PATH: None
+2025-05-03 13:45:34 - INFO - FINAL_EPOCH: 5
+2025-05-03 13:45:34 - INFO - OUTPUT_DIR: /raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/normative_results/2025-05-03_15-45_NormativeVAE_cobra_20250503_134532
+2025-05-03 13:45:34 - INFO - TRAIN_CSV: ['/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data_training/training_metadata.csv']
+2025-05-03 13:45:34 - INFO - ADVER_CSV: None
+2025-05-03 13:45:34 - INFO - MRI_DATA_PATH_TRAIN: /raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data/train_xml_data
+2025-05-03 13:45:34 - INFO - MRI_DATA_PATH_TEST: /raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data/test_xml_data
+2025-05-03 13:45:34 - INFO - PROC_DATA_PATH: /raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data_training/proc_extracted_xml_data
+2025-05-03 13:45:34 - INFO - ATLAS_NAME: cobra
+2025-05-03 13:45:34 - INFO - TEST_CSV: ['/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data_training/testing_metadata.csv']
+2025-05-03 13:45:34 - INFO - RUN_NAME: NormativeVAE_cobra_20250503_134532
+2025-05-03 13:45:34 - INFO - FIGURES_DIR: /raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/normative_results/2025-05-03_15-45_NormativeVAE_cobra_20250503_134532/figures
+2025-05-03 13:45:34 - INFO - LOGGING_DIR: /raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/normative_results/2025-05-03_15-45_NormativeVAE_cobra_20250503_134532/logs
+2025-05-03 13:45:34 - INFO - DATA_DIR: /raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/normative_results/2025-05-03_15-45_NormativeVAE_cobra_20250503_134532/data
+2025-05-03 13:45:34 - INFO - MODEL_DIR: /raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/normative_results/2025-05-03_15-45_NormativeVAE_cobra_20250503_134532/models
+2025-05-03 13:45:34 - INFO - Starting normative modeling with atlas: cobra, epochs: 5, bootstraps: 3
+2025-05-03 13:45:34 - INFO - Configuration saved to /raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/normative_results/2025-05-03_15-45_NormativeVAE_cobra_20250503_134532_20250503_134534/config.csv
+2025-05-03 13:45:34 - INFO - Using device: cuda
+2025-05-03 13:45:34 - INFO - Loading healthy control data...

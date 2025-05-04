@@ -7,7 +7,7 @@ import argparse
 import os
 from datetime import datetime
 import logging
-
+from pathlib import Path
 sys.path.append("../src")
 import torch
 import torchio as tio
@@ -36,7 +36,6 @@ from utils.logging_utils import (
     log_atlas_mode
 )
 
-# Importiere das normative VAE-Modul - stellen Sie sicher, dass dieser Pfad korrekt ist
 from models.ContrastVAE_2D_dev import (
     NormativeVAE, 
     train_normative_model,
@@ -44,7 +43,17 @@ from models.ContrastVAE_2D_dev import (
     compute_deviation_scores,
     visualize_deviation_scores,
     plot_deviation_maps,
-    run_normative_modeling_pipeline
+    run_normative_modeling_pipeline,
+    run_regional_analysis_pipeline,
+    get_atlas_regions, 
+    integrate_regional_analysis,
+    #compute_regional_deviations, 
+    identify_top_deviant_regions,
+    region_distribution_by_diagnosis, 
+    create_region_heatmap,
+    create_diagnosis_region_heatmap, 
+    visualize_region_deviations,
+
 )
 
 # Use non-interactive plotting to avoid tmux crashes
@@ -53,8 +62,8 @@ matplotlib.use("Agg")
 def create_arg_parser():
     parser = argparse.ArgumentParser(description='Arguments for Normative Modeling')
     parser.add_argument('--atlas_name', help='Name of the desired atlas for training.')
-    parser.add_argument('--num_epochs', help='Number of epochs to be trained for', type=int, default=50)
-    parser.add_argument('--n_bootstraps', help='Number of bootstrap samples', type=int, default=100)
+    parser.add_argument('--num_epochs', help='Number of epochs to be trained for', type=int, default=20)
+    parser.add_argument('--n_bootstraps', help='Number of bootstrap samples', type=int, default=50)
     parser.add_argument('--batch_size', help='Batch size', type=int, default=32)
     parser.add_argument('--learning_rate', help='Learning rate', type=float, default=4e-5)
     parser.add_argument('--latent_dim', help='Dimension of latent space', type=int, default=20)
@@ -85,6 +94,9 @@ def main(atlas_name: str, num_epochs: int, n_bootstraps: int, batch_size: int, l
         ATLAS_NAME=atlas_name,
         PROC_DATA_PATH="/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data_training/proc_extracted_xml_data",
         OUTPUT_DIR="/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/normative_results",
+        #load_mri_data
+        VOLUME_TYPE= "Vgm",
+        VALID_VOLUME_TYPES=["Vgm", "Vwm", "csf"],
         # Loading Model
         LOAD_MODEL=False,
         PRETRAIN_MODEL_PATH=None,
@@ -160,8 +172,11 @@ def main(atlas_name: str, num_epochs: int, n_bootstraps: int, batch_size: int, l
             diagnoses=["HC"],  # Only healthy controls for normative model
             hdf5=True,
             train_or_test="train",
-            save=True
+            save=True,
+            volume_type= config.VOLUME_TYPE,
+            valid_volume_types= config.VALID_VOLUME_TYPES,
         )
+        
         
         # Load patient data (non-HC)
         log_and_print("Loading patient data...")
@@ -172,8 +187,11 @@ def main(atlas_name: str, num_epochs: int, n_bootstraps: int, batch_size: int, l
             diagnoses=["CTT", "SCHZ", "MDD"],  # Add all patient diagnoses you want to test
             hdf5=True,
             train_or_test="test",
-            save=True
+            save=True,
+            volume_type= config.VOLUME_TYPE,
+            valid_volume_types= config.VALID_VOLUME_TYPES,
         )
+
     else:
         all_data_paths_train = get_all_data(directory=config.MRI_DATA_PATH_TRAIN, ext="h5")
         all_data_paths_test = get_all_data(directory=config.MRI_DATA_PATH_TEST, ext="h5")
@@ -184,7 +202,9 @@ def main(atlas_name: str, num_epochs: int, n_bootstraps: int, batch_size: int, l
             data_paths=all_data_paths_train,
             diagnoses=config.DIAGNOSES,
             hdf5=True,
-            train_or_test="train"
+            train_or_test="train",
+            volume_type= config.VOLUME_TYPE,
+            valid_volume_types= config.VALID_VOLUME_TYPES,
         )
         
         subjects_patients, annotations_patients = load_mri_data_2D_all_atlases(
@@ -192,7 +212,9 @@ def main(atlas_name: str, num_epochs: int, n_bootstraps: int, batch_size: int, l
             data_paths=all_data_paths_test,
             diagnoses=["CTT", "SCHZ", "MDD"],
             hdf5=True,
-            train_or_test="test"
+            train_or_test="test", 
+            volume_type= config.VOLUME_TYPE,
+            valid_volume_types= config.VALID_VOLUME_TYPES,
         )
 
     len_atlas = len(subjects_hc[0]["measurements"])
@@ -332,28 +354,8 @@ def main(atlas_name: str, num_epochs: int, n_bootstraps: int, batch_size: int, l
         title=f"Global Deviation Scores - {atlas_name}"
     )
     
-    # # If we have patient annotations with diagnosis information
-    # if "Diagnosis" in annotations_patients.columns:
-    #     diagnoses = annotations_patients["Diagnosis"].unique()
-        
-    #     # Create visualization per diagnosis
-    #     diagnosis_scores = {}
-    #     for diagnosis in diagnoses:
-    #         diagnosis_idx = annotations_patients["Diagnosis"] == diagnosis
-    #         diagnosis_patients = np.array(diagnosis_idx)
-    #         if np.sum(diagnosis_patients) > 0:
-    #             diagnosis_scores[diagnosis] = patient_global_z[diagnosis_patients].numpy()
-        
-    #     # Plot diagnosis-specific deviation scores
-    #     if len(diagnosis_scores) > 1:
-    #         plot_deviation_maps(
-    #             diagnosis_scores=diagnosis_scores,
-    #             hc_scores=hc_global_z,
-    #             save_path=f"{save_dir}/figures/diagnosis_deviation_scores.png",
-    #             title=f"Deviation Scores by Diagnosis - {atlas_name}"
-    #         )
-
-    # After running the normative modeling pipeline, add:
+  
+    # Normative Modellierung ist fertig — jetzt regionale Analyse:
     regional_analysis_results = integrate_regional_analysis(
         bootstrap_models=bootstrap_models,
         train_data=train_data,
@@ -365,8 +367,7 @@ def main(atlas_name: str, num_epochs: int, n_bootstraps: int, batch_size: int, l
 
     log_and_print(f"Normative modeling pipeline completed successfully!\nResults saved to {save_dir}")
     
-    
-    return save_dir
+
 
 if __name__ == "__main__": 
     arg_parser = create_arg_parser()
@@ -396,127 +397,3 @@ if __name__ == "__main__":
         seed=seed
     )
 
-
-
-    # Integration in main script
-# Add this to the end of your main() function before the return statement
-
-def get_atlas_regions(atlas_name):
-    """
-    Get region names for a given atlas.
-    
-    Parameters:
-    -----------
-    atlas_name : str
-        Name of the atlas
-        
-    Returns:
-    --------
-    list: List of region names
-    """
-    # Define atlas region mappings
-    atlas_regions = {
-        "AAL": [
-            "Precentral_L", "Precentral_R", "Frontal_Sup_L", "Frontal_Sup_R", 
-            "Frontal_Sup_Orb_L", "Frontal_Sup_Orb_R", "Frontal_Mid_L", "Frontal_Mid_R", 
-            # Add more AAL regions here...
-        ],
-        "Desikan": [
-            "ctx-lh-bankssts", "ctx-lh-caudalanteriorcingulate", "ctx-lh-caudalmiddlefrontal",
-            "ctx-lh-cuneus", "ctx-lh-entorhinal", "ctx-lh-fusiform", "ctx-lh-inferiorparietal",
-            # Add more Desikan regions here...
-        ],
-        # Add other atlases as needed
-    }
-    
-    # If atlas is not in our mapping, return None and let the function generate generic names
-    return atlas_regions.get(atlas_name, None)
-
-# Add this to your main() function before the return statement
-def integrate_regional_analysis(bootstrap_models, train_data, patient_data, annotations_patients, 
-                              atlas_name, save_dir):
-    """
-    Integrate the regional analysis into the main script.
-    
-    Parameters:
-    -----------
-    bootstrap_models : list
-        List of trained normative VAE models from bootstrap samples
-    train_data : torch.Tensor
-        Tensor of healthy control ROI measurements
-    patient_data : torch.Tensor
-        Tensor of patient ROI measurements
-    annotations_patients : pandas.DataFrame
-        DataFrame containing patient metadata including diagnoses
-    atlas_name : str
-        Name of the brain atlas used
-    save_dir : str or Path
-        Directory to save results
-        
-    Returns:
-    --------
-    None
-    """
-    import logging
-    import numpy as np
-    import pandas as pd
-    from pathlib import Path
-    
-    # Create a dictionary to map diagnosis codes to readable labels
-    diagnosis_labels = {
-        "CTT": "Catatonia",
-        "SCHZ": "Schizophrenia",
-        "MDD": "Major Depression",
-        "HC": "Healthy Control"
-    }
-    
-    # Extract diagnoses from annotations
-    if "Diagnosis" in annotations_patients.columns:
-        patient_diagnoses = annotations_patients["Diagnosis"].tolist()
-    else:
-        logging.warning("No 'Diagnosis' column found in patient annotations. Using generic labels.")
-        patient_diagnoses = ["Unknown"] * len(patient_data)
-    
-    # Get region names for the atlas
-    atlas_regions = get_atlas_regions(atlas_name)
-    
-    # Create a new directory for regional analysis
-    regional_dir = Path(save_dir) / "regional_analysis"
-    regional_dir.mkdir(exist_ok=True)
-    
-    # Run the regional analysis pipeline
-    logging.info(f"Starting regional analysis for atlas: {atlas_name}")
-    
-    from regional_deviation_analysis import run_regional_analysis_pipeline
-    
-    analysis_results = run_regional_analysis_pipeline(
-        bootstrap_models=bootstrap_models,
-        healthy_data=train_data,
-        patient_data=patient_data,
-        patient_diagnoses=patient_diagnoses,
-        atlas_regions=atlas_regions,
-        diagnosis_labels=diagnosis_labels,
-        save_dir=regional_dir
-    )
-    
-    logging.info(f"Regional analysis completed. Results saved to {regional_dir}")
-    
-    return analysis_results
-
-
-# Add the following to your main() function just before the return statement
-if __name__ == "__main__":
-    # ... (existing code)
-    
-    # After running the normative modeling pipeline, add:
-    regional_analysis_results = integrate_regional_analysis(
-        bootstrap_models=bootstrap_models,
-        train_data=train_data,
-        patient_data=patient_data,
-        annotations_patients=annotations_patients,
-        atlas_name=atlas_name,
-        save_dir=save_dir
-    )
-    
-    # Return statement (keep your existing return)
-    return save_dir

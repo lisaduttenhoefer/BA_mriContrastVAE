@@ -1,0 +1,128 @@
+2025-05-03 15:21:28 - INFO - Starting new training session
+2025-05-03 15:21:28 - INFO - Configuration:
+2025-05-03 15:21:28 - INFO - LEARNING_RATE: 4e-05
+2025-05-03 15:21:28 - INFO - WEIGHT_DECAY: 0.004
+2025-05-03 15:21:28 - INFO - BATCH_SIZE: 32
+2025-05-03 15:21:28 - INFO - LATENT_DIM: 20
+2025-05-03 15:21:28 - INFO - CONTR_LOSS_WEIGHT: 0.0
+2025-05-03 15:21:28 - INFO - RECON_LOSS_WEIGHT: 40.0
+2025-05-03 15:21:28 - INFO - KLDIV_LOSS_WEIGHT: 4.0
+2025-05-03 15:21:28 - INFO - ADVER_LR: None
+2025-05-03 15:21:28 - INFO - CLASS_LOSS_WEIGHT: None
+2025-05-03 15:21:28 - INFO - CONTRAST_TEMPERATURE: None
+2025-05-03 15:21:28 - INFO - TOTAL_EPOCHS: 5
+2025-05-03 15:21:28 - INFO - VOLUME_TYPE: Vgm
+2025-05-03 15:21:28 - INFO - VALID_VOLUME_TYPES: ['Vgm', 'Vwm', 'csf']
+2025-05-03 15:21:28 - INFO - CHECKPOINT_INTERVAL: 5
+2025-05-03 15:21:28 - INFO - DIAGNOSES: ['HC']
+2025-05-03 15:21:28 - INFO - UMAP_NEIGHBORS: 30
+2025-05-03 15:21:28 - INFO - SHUFFLE_DATA: True
+2025-05-03 15:21:28 - INFO - SEED: 42
+2025-05-03 15:21:28 - INFO - START_EPOCH: 0
+2025-05-03 15:21:28 - INFO - DROPOUT_PROB: 0.1
+2025-05-03 15:21:28 - INFO - USE_SSIM: False
+2025-05-03 15:21:28 - INFO - SCHEDULE_ON_VALIDATION: True
+2025-05-03 15:21:28 - INFO - SCHEDULER_PATIENCE: 6
+2025-05-03 15:21:28 - INFO - SCHEDULER_FACTOR: 0.5
+2025-05-03 15:21:28 - INFO - EARLY_STOPPING: True
+2025-05-03 15:21:28 - INFO - STOP_LEARNING_RATE: 4e-08
+2025-05-03 15:21:28 - INFO - DEVICE: cuda:1
+2025-05-03 15:21:28 - INFO - TIMESTAMP: 2025-05-03_17-21
+2025-05-03 15:21:28 - INFO - DONT_PLOT_N_EPOCHS: 0
+2025-05-03 15:21:28 - INFO - METRICS_ROLLING_WINDOW: 10
+2025-05-03 15:21:28 - INFO - UMAP_DOT_SIZE: 20
+2025-05-03 15:21:28 - INFO - LOAD_MODEL: False
+2025-05-03 15:21:28 - INFO - PRETRAIN_MODEL_PATH: None
+2025-05-03 15:21:28 - INFO - PRETRAIN_METRICS_PATH: None
+2025-05-03 15:21:28 - INFO - FINAL_EPOCH: 5
+2025-05-03 15:21:28 - INFO - OUTPUT_DIR: /raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/normative_results/2025-05-03_17-21_NormativeVAE_cobra_20250503_152126
+2025-05-03 15:21:28 - INFO - TRAIN_CSV: ['/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data_training/training_metadata.csv']
+2025-05-03 15:21:28 - INFO - ADVER_CSV: None
+2025-05-03 15:21:28 - INFO - MRI_DATA_PATH_TRAIN: /raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data/train_xml_data
+2025-05-03 15:21:28 - INFO - MRI_DATA_PATH_TEST: /raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data/test_xml_data
+2025-05-03 15:21:28 - INFO - PROC_DATA_PATH: /raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data_training/proc_extracted_xml_data
+2025-05-03 15:21:28 - INFO - ATLAS_NAME: cobra
+2025-05-03 15:21:28 - INFO - TEST_CSV: ['/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data_training/testing_metadata.csv']
+2025-05-03 15:21:28 - INFO - RUN_NAME: NormativeVAE_cobra_20250503_152126
+2025-05-03 15:21:28 - INFO - FIGURES_DIR: /raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/normative_results/2025-05-03_17-21_NormativeVAE_cobra_20250503_152126/figures
+2025-05-03 15:21:28 - INFO - LOGGING_DIR: /raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/normative_results/2025-05-03_17-21_NormativeVAE_cobra_20250503_152126/logs
+2025-05-03 15:21:28 - INFO - DATA_DIR: /raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/normative_results/2025-05-03_17-21_NormativeVAE_cobra_20250503_152126/data
+2025-05-03 15:21:28 - INFO - MODEL_DIR: /raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/normative_results/2025-05-03_17-21_NormativeVAE_cobra_20250503_152126/models
+2025-05-03 15:21:28 - INFO - Starting normative modeling with atlas: cobra, epochs: 5, bootstraps: 3
+2025-05-03 15:21:28 - INFO - Configuration saved to /raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/normative_results/2025-05-03_17-21_NormativeVAE_cobra_20250503_152126_20250503_152128/config.csv
+2025-05-03 15:21:28 - INFO - Using device: cuda
+2025-05-03 15:21:28 - INFO - Loading healthy control data...
+2025-05-03 15:21:35 - INFO - Loading patient data...
+2025-05-03 15:21:41 - INFO - Number of ROIs in atlas: 52
+2025-05-03 15:21:41 - INFO -                                                Filename Data_Type Dataset Diagnosis   Age     Sex Usage_original  Sex_int
+0                                         CC0212_0_MPR1     train      NU        HC   0.0  Female        testing        0
+1                                        CC0239_24_MPR1     train      NU        HC   0.0  Female        testing        0
+2                                         CC0311_0_MPR1     train      NU        HC   0.0  Female        testing        0
+3                                         CC0325_0_MPR1     train      NU        HC   0.0  Female        testing        0
+4                                         CC0385_0_MPR1     train      NU        HC   0.0    Male        testing        1
+...                                                 ...       ...     ...       ...   ...     ...            ...      ...
+1662   sub-A00036497_ses-20050101_acq-mprage_run-01_T1w     valid    MCIC        HC  23.0    Male       training        1
+1663  sub-A00036555_ses-20130101_sub-A00036555_ses-2...     valid   COBRE        HC  52.0    Male     validation        1
+1664  sub-A00036916_ses-20130101_sub-A00036916_ses-2...     valid   COBRE        HC  55.0    Male       training        1
+1665  sub-A00037007_ses-20130101_sub-A00037007_ses-2...     valid   COBRE        HC  60.0    Male     validation        1
+1666  sub-A00037665_ses-20130101_sub-A00037665_ses-2...     valid   COBRE        HC  43.0    Male     validation        1
+
+[1667 rows x 8 columns]
+2025-05-03 15:21:41 - INFO - Using atlas: cobra
+Number of ROIs: 52
+2025-05-03 15:21:41 - INFO - Data Processing
+2025-05-03 15:21:41 - INFO - Loading Data
+2025-05-03 15:21:41 - INFO -   Training Data (HC):  1329 subjects loaded
+2025-05-03 15:21:41 - INFO -   Validation Data (HC):  332 subjects loaded
+2025-05-03 15:21:41 - INFO -   Patient Data:        1221 subjects loaded
+2025-05-03 15:21:41 - INFO - Creating Model
+2025-05-03 15:21:41 - INFO - Training data shape: torch.Size([1329, 52])
+2025-05-03 15:21:41 - INFO - Validation data shape: torch.Size([332, 52])
+2025-05-03 15:21:41 - INFO - Patient data shape: torch.Size([1221, 52])
+2025-05-03 15:21:44 - INFO - Model Archtecture: 
+NormativeVAE(
+  (encoder): Sequential(
+    (0): Linear(in_features=52, out_features=100, bias=True)
+    (1): LeakyReLU(negative_slope=0.01)
+    (2): Dropout(p=0.1, inplace=False)
+    (3): Linear(in_features=100, out_features=100, bias=True)
+    (4): LeakyReLU(negative_slope=0.01)
+    (5): Dropout(p=0.1, inplace=False)
+    (6): Linear(in_features=100, out_features=20, bias=True)
+  )
+  (fc_mu): Linear(in_features=20, out_features=20, bias=True)
+  (fc_var): Linear(in_features=20, out_features=20, bias=True)
+  (decoder): Sequential(
+    (0): Linear(in_features=20, out_features=100, bias=True)
+    (1): LeakyReLU(negative_slope=0.01)
+    (2): Dropout(p=0.1, inplace=False)
+    (3): Linear(in_features=100, out_features=100, bias=True)
+    (4): LeakyReLU(negative_slope=0.01)
+    (5): Dropout(p=0.1, inplace=False)
+    (6): Linear(in_features=100, out_features=52, bias=True)
+  )
+)
+2025-05-03 15:21:44 - INFO -     latent_dim:          20
+2025-05-03 15:21:44 - INFO -     optimizer:           Adam (
+2025-05-03 15:21:44 - INFO -     scheduler:           <torch.optim.lr_scheduler.ReduceLROnPlateau object at 0x7fbf797ffd30>
+2025-05-03 15:21:44 - INFO -     scaler:              <torch.cuda.amp.grad_scaler.GradScaler object at 0x7fbf6ee7ccd0>
+2025-05-03 15:21:44 - INFO -     kldiv_loss_weight:   4.0
+2025-05-03 15:21:44 - INFO -     schedule_on_validation: True
+2025-05-03 15:21:44 - INFO -     scheduler_patience:  10
+2025-05-03 15:21:44 - INFO -     scheduler_factor:    0.5
+2025-05-03 15:21:44 - INFO -     learning_rate:       4e-05
+2025-05-03 15:21:44 - INFO -     weight_decay:        1e-05
+2025-05-03 15:21:44 - INFO -     dropout_prob:        0.1
+2025-05-03 15:21:44 - INFO -     device:              cuda
+2025-05-03 15:21:44 - INFO -     Total Parameters:    35,712
+2025-05-03 15:21:44 - INFO -     Trainable Params:    35,712
+2025-05-03 15:21:44 - INFO - Running normative modeling pipeline...
+2025-05-03 15:21:44 - INFO - Input dimension: 52
+2025-05-03 15:21:44 - INFO - Starting bootstrap training with 3 models...
+2025-05-03 15:21:50 - INFO - Computing deviation scores for healthy controls...
+2025-05-03 15:21:50 - INFO - Computing deviation scores for patients...
+2025-05-03 15:21:50 - INFO - Visualizing deviation scores...
+2025-05-03 15:21:51 - INFO - Saving results...
+2025-05-03 15:21:51 - INFO - Normative modeling pipeline completed. Results saved in /raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/normative_results/2025-05-03_17-21_NormativeVAE_cobra_20250503_152126_20250503_152128
+2025-05-03 15:21:51 - INFO - Creating additional visualizations...
+2025-05-03 15:21:52 - INFO - Starting regional analysis for atlas: cobra

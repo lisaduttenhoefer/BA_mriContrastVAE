@@ -78,6 +78,8 @@ class Config_2D:
         DIAGNOSES: List[str],
         # Whether to use the Structural Similarity Index (SSIM) as a loss function for reconstruction loss.
         # Not all models support this.
+        VOLUME_TYPE: str,
+        VALID_VOLUME_TYPES: List[str],
         USE_SSIM: bool = False,
         # Whether to use early stopping during training, based on the LR being too low.
         EARLY_STOPPING: bool = True,
@@ -160,6 +162,9 @@ class Config_2D:
         self.CLASS_LOSS_WEIGHT = CLASS_LOSS_WEIGHT
         self.CONTRAST_TEMPERATURE = CONTRAST_TEMPERATURE
         self.TOTAL_EPOCHS = TOTAL_EPOCHS
+        ###
+        self.VOLUME_TYPE = VOLUME_TYPE
+        self.VALID_VOLUME_TYPES = VALID_VOLUME_TYPES
         # self.COVARS = COVARS
 
         # set up optional training parameters

@@ -4,7 +4,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset, Subset
 from torch.cuda.amp import GradScaler, autocast
-
+from pathlib import Path
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -513,10 +513,10 @@ def visualize_deviation_scores(hc_scores, patient_scores, title="Deviation Score
     # Histogram for patients
     plt.hist(patient_scores, bins=30, alpha=0.5, label='Patients')
     
-    # Thresholds
-    for z in [2, 3]:
-        plt.axvline(x=z, color='r', linestyle='--', alpha=0.7, 
-                   label=f'Threshold (Z={z})')
+    # # Thresholds
+    # for z in [2, 3]:
+    #     plt.axvline(x=z, color='r', linestyle='--', alpha=0.7, 
+    #                label=f'Threshold (Z={z})')
     
     plt.xlabel('Global Deviation Score (Z-Score)')
     plt.ylabel('Number of Samples')
@@ -524,11 +524,11 @@ def visualize_deviation_scores(hc_scores, patient_scores, title="Deviation Score
     plt.legend()
     plt.grid(alpha=0.3)
     
-    # Percentage of samples above thresholds
-    for z in [2, 3]:
-        hc_above = 100 * np.mean(hc_scores > z)
-        pat_above = 100 * np.mean(patient_scores > z)
-        print(f"Z > {z}: {hc_above:.1f}% of HC and {pat_above:.1f}% of patients")
+    # # Percentage of samples above thresholds
+    # for z in [2, 3]:
+    #     hc_above = 100 * np.mean(hc_scores > z)
+    #     pat_above = 100 * np.mean(patient_scores > z)
+    #     print(f"Z > {z}: {hc_above:.1f}% of HC and {pat_above:.1f}% of patients")
     
     if save_path:
         plt.savefig(save_path, dpi=300, bbox_inches='tight')
@@ -669,6 +669,8 @@ def run_normative_modeling_pipeline(healthy_data, patient_data, contrastvae=None
         patient_scores=patient_global_z,
         save_path=f"{save_dir}/figures/deviation_scores_distribution.png"
     )
+    logging.info("Identifying top deviant regions...")
+    identify_top_deviant_regions(patient_z_scores, atlas_regions=None, n_top=10)
     
     # 4. Save results as CSV
     logging.info("Saving results...")
@@ -759,13 +761,539 @@ def get_atlas_regions(atlas_name):
     
     # If atlas is not in our mapping, return None and let the function generate generic names
     return atlas_regions.get(atlas_name, None)
+    
+# def compute_regional_deviations(bootstrap_models, data, sample_ids=None, batch_size=32):
+#     """
+#     Calculate region-level deviation scores with a set of bootstrap models
+    
+#     Args:
+#         bootstrap_models: List of trained bootstrap models
+#         data: Data to test (tensor)
+#         sample_ids: Optional list of sample IDs corresponding to data rows
+#         batch_size: Batch size
+    
+#     Returns:
+#         region_z_scores: Z-scores for each region and sample [samples, regions]
+#         sample_ids: Original sample IDs in the same order as region_z_scores (if provided)
+#     """
+#     import torch
+#     import numpy as np
+#     from torch.utils.data import DataLoader, TensorDataset
+#     from tqdm import tqdm
+#     import logging
+    
+#     device = bootstrap_models[0].device
+#     n_bootstraps = len(bootstrap_models)
+#     n_samples = len(data)
+#     n_regions = data.shape[1]
+    
+#     # Array for reconstruction errors per region
+#     all_errors = np.zeros((n_bootstraps, n_samples, n_regions))
+    
+#     # Create DataLoader
+#     data_loader = DataLoader(
+#         TensorDataset(data),
+#         batch_size=batch_size,
+#         shuffle=False  # Important: keep original order for sample_ids matching
+#     )
+    
+#     # Calculate reconstruction error for each bootstrap model
+#     for b, model in enumerate(tqdm(bootstrap_models, desc="Computing Regional Deviations")):
+#         model.eval()
+#         batch_start = 0
+        
+#         with torch.no_grad():
+#             for batch_idx, (x,) in enumerate(data_loader):
+#                 x = x.to(device)
+#                 batch_size_actual = x.shape[0]
+                
+#                 # Calculate reconstruction error
+#                 recon_error = model.compute_reconstruction_error(x).cpu().numpy()
+                
+#                 # Store errors
+#                 all_errors[b, batch_start:batch_start+batch_size_actual] = recon_error
+#                 batch_start += batch_size_actual
+    
+#     # Mean and standard deviation across bootstrap models
+#     mean_errors = np.mean(all_errors, axis=0)  # Mean across bootstraps [samples, regions]
+#     std_errors = np.std(all_errors, axis=0)    # Std across bootstraps [samples, regions]
+    
+#     # Prevent division by zero
+#     std_errors = np.maximum(std_errors, 1e-8)
+    
+#     # Calculate Z-scores for each region
+#     region_z_scores = mean_errors / std_errors
+    
+#     # Return with sample IDs if provided
+#     if sample_ids is not None:
+#         # Make sure sample_ids length matches the data
+#         if len(sample_ids) != len(region_z_scores):
+#             logging.warning(f"Length mismatch: {len(region_z_scores)} samples in results but {len(sample_ids)} in sample_ids")
+#             # Trim to match
+#             sample_ids = sample_ids[:len(region_z_scores)]
+#         return region_z_scores, sample_ids
+#     else:
+#         return region_z_scores
+
+def identify_top_deviant_regions(patient_z_scores, atlas_regions=None, n_top=10):
+    """
+    Identify top deviant regions across samples
+    
+    Args:
+        region_z_scores: Z-scores for each region and sample [samples, regions]
+        atlas_regions: List of region names (optional)
+        n_top: Number of top regions to return
+    
+    Returns:
+        top_regions: Dictionary with statistics for top deviant regions
+    """
+    # Mean Z-score across samples
+    mean_region_z = np.mean(patient_z_scores, axis=0)
+    
+    # If no region names are provided, create generic names
+    if atlas_regions is None or len(atlas_regions) != patient_z_scores.shape[1]:
+        atlas_regions = [f"Region_{i+1}" for i in range(patient_z_scores.shape[1])]
+    
+    # Find top deviant regions
+    top_indices = np.argsort(mean_region_z)[::-1][:n_top]
+    
+    top_regions = {
+        "region_names": [atlas_regions[i] for i in top_indices],
+        "mean_z_scores": mean_region_z[top_indices],
+        "indices": top_indices
+    }
+    
+    return top_regions
 
 
-# Add this to your main() function before the return statement
+def region_distribution_by_diagnosis(patient_z_scores, patient_diagnoses, patient_ids=None, sample_ids=None, diagnosis_labels=None):
+    """
+    Group regional Z-scores by diagnosis, ensuring data alignment between scores and diagnoses
+    
+    Args:
+        region_z_scores: Z-scores for each region and sample [samples, regions]
+        patient_diagnoses: List of diagnoses for each patient
+        patient_ids: List of patient IDs corresponding to the diagnoses
+        sample_ids: List of sample IDs corresponding to the region_z_scores
+                   (if None, assumes patient_ids and region_z_scores are already aligned)
+        diagnosis_labels: Dictionary mapping diagnosis codes to readable labels
+    
+    Returns:
+        diagnosis_grouped: Dictionary with region scores grouped by diagnosis
+    """
+    import numpy as np
+    import logging
+    
+    # Default diagnosis labels if not provided
+    if diagnosis_labels is None:
+        diagnosis_labels = {}
+    
+    # Convert to numpy array if not already
+    if not isinstance(patient_z_scores, np.ndarray):
+        patient_z_scores = np.array(patient_z_scores)
+    
+    # Check for dimension mismatch and fix it
+    if len(patient_diagnoses) != len(patient_z_scores):
+        logging.warning(f"Dimension mismatch: {len(patient_z_scores)} samples in patient_z_scores but {len(patient_diagnoses)} diagnoses")
+        
+        # If patient_ids and sample_ids are provided, we can properly align the data
+        if patient_ids is not None and sample_ids is not None:
+            logging.info("Aligning data using patient IDs and sample IDs")
+            # Create a mapping from patient_ids to diagnoses
+            patient_to_diagnosis = {pid: diag for pid, diag in zip(patient_ids, patient_diagnoses)}
+            
+            # Get diagnoses for only the samples we have data for
+            aligned_diagnoses = []
+            for sid in sample_ids:
+                if sid in patient_to_diagnosis:
+                    aligned_diagnoses.append(patient_to_diagnosis[sid])
+                else:
+                    # Handle case where we have data but no diagnosis
+                    aligned_diagnoses.append("Unknown")
+                    logging.warning(f"No diagnosis found for sample ID: {sid}")
+            
+            # Use the aligned diagnoses for grouping
+            patient_diagnoses = aligned_diagnoses
+        else:
+            # If we can't properly align, just truncate the longer list
+            logging.warning("No ID information for alignment. Truncating lists to match shortest length.")
+            min_len = min(len(patient_z_scores), len(patient_diagnoses))
+            patient_z_scores = patient_z_scores[:min_len]
+            patient_diagnoses = patient_diagnoses[:min_len]
+    
+    # Group by diagnosis
+    unique_diagnoses = set(patient_diagnoses)
+    diagnosis_grouped = {}
+    
+    for diagnosis in unique_diagnoses:
+        # Find samples with this diagnosis
+        diagnosis_mask = np.array([d == diagnosis for d in patient_diagnoses])
+        
+        # Double-check the dimensions
+        if len(diagnosis_mask) != len(patient_z_scores):
+            logging.error(f"Dimension mismatch after alignment: {len(patient_z_scores)} samples vs {len(diagnosis_mask)} mask elements")
+            continue
+        
+        # Skip if no samples with this diagnosis
+        if not np.any(diagnosis_mask):
+            logging.info(f"No samples found for diagnosis: {diagnosis}")
+            continue
+        
+        # Get scores for this diagnosis
+        diagnosis_scores = patient_z_scores[diagnosis_mask]
+        
+        # Use label if available, otherwise use the code
+        label = diagnosis_labels.get(diagnosis, diagnosis)
+        diagnosis_grouped[label] = diagnosis_scores
+        logging.info(f"Found {len(diagnosis_scores)} samples for diagnosis: {label}")
+    
+    return diagnosis_grouped
+
+def create_region_heatmap(patient_z_scores, atlas_regions=None, save_path=None):
+    """
+    Create a heatmap of region deviations
+    
+    Args:
+        region_z_scores: Z-scores for each region and sample [samples, regions]
+        atlas_regions: List of region names
+        save_path: Path to save the figure
+    """
+    # If no region names are provided, create generic names
+    if atlas_regions is None or len(atlas_regions) != patient_z_scores.shape[1]:
+        atlas_regions = [f"Region_{i+1}" for i in range(patient_z_scores.shape[1])]
+    
+    # Mean Z-score across samples
+    mean_region_z = np.mean(patient_z_scores, axis=0)
+    
+    # Sort regions by mean Z-score
+    sorted_indices = np.argsort(mean_region_z)[::-1]
+    sorted_regions = [atlas_regions[i] for i in sorted_indices]
+    sorted_scores = mean_region_z[sorted_indices]
+    
+    # Create DataFrame for heatmap
+    df = pd.DataFrame({'Region': sorted_regions, 'Mean Z-Score': sorted_scores})
+    
+    # Create plot
+    plt.figure(figsize=(10, max(8, len(sorted_regions) * 0.3)))
+    
+    # Create heatmap
+    sns.heatmap(
+        df[['Mean Z-Score']].T,
+        annot=True,
+        fmt=".2f",
+        cmap="YlOrRd",
+        xticklabels=df['Region'],
+        yticklabels=['Mean Z-Score'],
+        cbar_kws={'label': 'Z-Score'}
+    )
+    
+    plt.title('Region Deviation Scores')
+    plt.xticks(rotation=90)
+    plt.tight_layout()
+    
+    if save_path:
+        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    
+    plt.close()
+
+def create_diagnosis_region_heatmap(diagnosis_grouped, atlas_regions=None, top_n=20, save_path=None):
+    """
+    Create a heatmap of top regions by diagnosis
+    
+    Args:
+        diagnosis_grouped: Dictionary with region scores grouped by diagnosis
+        atlas_regions: List of region names
+        top_n: Number of top regions to show
+        save_path: Path to save the figure
+    """
+    if not diagnosis_grouped:
+        logging.warning("No diagnosis data available for heatmap")
+        return
+    
+    # If no region names are provided, create generic names based on first diagnosis
+    first_diag = list(diagnosis_grouped.keys())[0]
+    first_data = diagnosis_grouped[first_diag]
+    
+    if atlas_regions is None or len(atlas_regions) != first_data.shape[1]:
+        atlas_regions = [f"Region_{i+1}" for i in range(first_data.shape[1])]
+    
+    # Calculate mean Z-scores for each diagnosis and region
+    diagnosis_means = {}
+    for diagnosis, scores in diagnosis_grouped.items():
+        diagnosis_means[diagnosis] = np.mean(scores, axis=0)
+    
+    # Combine all means
+    all_means = np.vstack(list(diagnosis_means.values()))
+    
+    # Calculate overall region importance (mean across diagnoses)
+    region_importance = np.mean(all_means, axis=0)
+    
+    # Get top N important regions
+    top_indices = np.argsort(region_importance)[::-1][:top_n]
+    top_regions = [atlas_regions[i] for i in top_indices]
+    
+    # Create data for heatmap
+    heatmap_data = []
+    for diagnosis, means in diagnosis_means.items():
+        for idx in top_indices:
+            heatmap_data.append({
+                'Diagnosis': diagnosis,
+                'Region': atlas_regions[idx],
+                'Z-Score': means[idx]
+            })
+    
+    heatmap_df = pd.DataFrame(heatmap_data)
+    
+    # Pivot for heatmap format
+    pivot_df = heatmap_df.pivot(index='Region', columns='Diagnosis', values='Z-Score')
+    
+    # Sort regions by mean Z-score
+    region_means = pivot_df.mean(axis=1)
+    pivot_df = pivot_df.loc[region_means.sort_values(ascending=False).index]
+    
+    # Create plot
+    plt.figure(figsize=(12, max(8, len(top_regions) * 0.4)))
+    
+    # Create heatmap
+    sns.heatmap(
+        pivot_df,
+        annot=True,
+        fmt=".2f",
+        cmap="YlOrRd",
+        cbar_kws={'label': 'Mean Z-Score'}
+    )
+    
+    plt.title('Top Deviant Regions by Diagnosis')
+    plt.xticks(rotation=45)
+    plt.tight_layout()
+    
+    if save_path:
+        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    
+    plt.close()
+
+def visualize_region_deviations(patient_z_scores, atlas_regions=None, top_n=15, save_path=None):
+    """
+    Visualize the top deviant regions as a bar plot
+    
+    Args:
+        region_z_scores: Z-scores for each region and sample [samples, regions]
+        atlas_regions: List of region names
+        top_n: Number of top regions to show
+        save_path: Path to save the figure
+    """
+    
+    # If no region names are provided, create generic names
+    if atlas_regions is None or len(atlas_regions) != patient_z_scores.shape[1]:
+        atlas_regions = [f"Region_{i+1}" for i in range(patient_z_scores.shape[1])]
+    
+    # Mean Z-score across samples
+    mean_region_z = np.mean(patient_z_scores, axis=0)
+    
+    # Find top deviant regions
+    top_indices = np.argsort(mean_region_z)[::-1][:top_n]
+    top_regions = [atlas_regions[i] for i in top_indices]
+    top_scores = mean_region_z[top_indices]
+    
+    # Create plot
+    plt.figure(figsize=(12, 8))
+    
+    # Plot horizontal bars
+    y_pos = np.arange(len(top_regions))
+    plt.barh(y_pos, top_scores, align='center', alpha=0.8, color='skyblue')
+    plt.yticks(y_pos, top_regions)
+    
+    # Add values to the bars
+    for i, v in enumerate(top_scores):
+        plt.text(v + 0.1, i, f"{v:.2f}", va='center')
+    
+    plt.xlabel('Mean Z-Score')
+    plt.title('Top Deviant Brain Regions')
+    plt.grid(axis='x', alpha=0.3)
+    plt.tight_layout()
+    
+    # Add a vertical line at threshold 2.0
+    plt.axvline(x=2.0, color='red', linestyle='--', alpha=0.7, label='Z=2 Threshold')
+    plt.legend()
+    
+    if save_path:
+        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    
+    plt.close()
+
+def run_regional_analysis_pipeline(bootstrap_models, healthy_data, patient_data, 
+                                 patient_diagnoses=None, patient_ids=None, sample_ids=None,
+                                 atlas_regions=None, diagnosis_labels=None, save_dir=None, batch_size=32,):
+    """
+    Run the regional deviation analysis pipeline with improved data alignment
+    
+    Args:
+        bootstrap_models: List of trained bootstrap models
+        healthy_data: Tensor of healthy control data
+        patient_data: Tensor of patient data
+        patient_diagnoses: List of diagnoses for patient samples (optional)
+        patient_ids: List of patient IDs corresponding to diagnoses (optional)
+        sample_ids: List of sample IDs corresponding to patient_data rows (optional)
+        atlas_regions: List of region names (optional)
+        diagnosis_labels: Dictionary mapping diagnosis codes to readable labels
+        save_dir: Directory to save results
+    
+    Returns:
+        analysis_results: Dictionary with analysis results
+    """
+    
+    
+    if save_dir is not None:
+        save_dir = Path(save_dir)
+        save_dir.mkdir(exist_ok=True)
+    
+    # 1. Compute regional deviations
+    logging.info("Computing regional deviations for healthy controls...")
+    # hc_region_z_scores = compute_regional_deviations(
+    #     bootstrap_models=bootstrap_models,
+    #     data=healthy_data
+    # )
+    hc_patient_z_scores, hc_region_global_z = compute_deviation_scores(
+        bootstrap_models=bootstrap_models,
+        data=healthy_data, 
+        batch_size=batch_size,  
+     )
+    
+    logging.info("Computing regional deviations for patients...")
+    if sample_ids is None:
+        # If no sample IDs provided, compute without them
+        patient_patient_z_scores, patient_region_global_z = compute_deviation_scores(
+        bootstrap_models=bootstrap_models,
+        data=patient_data,
+        batch_size=batch_size,
+    )
+    else:
+        # Compute with sample IDs for tracking
+        patient_patient_z_scores, aligned_sample_ids = compute_deviation_scores(
+        bootstrap_models=bootstrap_models,
+        data=patient_data,
+        batch_size=batch_size,
+        )
+    
+    # Save region z-scores with IDs if available
+    if save_dir is not None:
+        # Create DataFrame with region z-scores
+        patient_z_df = pd.DataFrame(patient_patient_z_scores)
+        
+        # Add sample/patient IDs if available
+        if sample_ids is not None:
+            patient_z_df.insert(0, 'sample_id', sample_ids[:len(patient_patient_z_scores)])
+        
+        if patient_ids is not None and len(patient_ids) == len(patient_patient_z_scores):
+            patient_z_df.insert(0, 'patient_id', patient_ids[:len(patient_patient_z_scores)])
+        
+        # Save to CSV
+        patient_z_df.to_csv(save_dir / "patient_patient_z_scores_with_ids.csv", index=False)
+    
+    # 2. Identify top deviant regions
+    logging.info("Identifying top deviant regions...")
+    hc_top_regions = identify_top_deviant_regions(
+        patient_z_scores=hc_patient_z_scores,
+        atlas_regions=atlas_regions
+    )
+    
+    patient_top_regions = identify_top_deviant_regions(
+        patient_z_scores=patient_patient_z_scores,
+        atlas_regions=atlas_regions
+    )
+    
+    # 3. Analysis by diagnosis (if available)
+    diagnosis_grouped = None
+    if patient_diagnoses is not None:
+        logging.info("Grouping regional deviations by diagnosis...")
+        
+        # Use our updated function with sample IDs for alignment
+        diagnosis_grouped = region_distribution_by_diagnosis(
+            patient_z_scores=patient_patient_z_scores,
+            patient_diagnoses=patient_diagnoses,
+            patient_ids=patient_ids,
+            sample_ids=sample_ids if sample_ids is not None else None,
+            diagnosis_labels=diagnosis_labels
+        )
+    
+    # 4. Visualizations
+    if save_dir is not None:
+        # Create figures directory
+        figures_dir = save_dir / "figures"
+        figures_dir.mkdir(exist_ok=True)
+        
+        logging.info("Creating visualizations...")
+        
+        # Visualize top deviant regions
+        try:
+            visualize_region_deviations(
+                patient_z_scores=patient_patient_z_scores,
+                atlas_regions=atlas_regions,
+                top_n=15,
+                save_path=figures_dir / "top_deviant_regions.png"
+            )
+        except Exception as e:
+            logging.error(f"Error creating region deviation visualization: {e}")
+        
+        # Create region heatmap
+        try:
+            create_region_heatmap(
+                patient_z_scores=patient_patient_z_scores,
+                atlas_regions=atlas_regions,
+                save_path=figures_dir / "region_heatmap.png"
+            )
+        except Exception as e:
+            logging.error(f"Error creating region heatmap: {e}")
+        
+        # Create diagnosis-specific heatmap
+        if diagnosis_grouped:
+            try:
+                create_diagnosis_region_heatmap(
+                    diagnosis_grouped=diagnosis_grouped,
+                    atlas_regions=atlas_regions,
+                    top_n=20,
+                    save_path=figures_dir / "diagnosis_region_heatmap.png"
+                )
+            except Exception as e:
+                logging.error(f"Error creating diagnosis heatmap: {e}")
+    
+    # 5. Save results
+    if save_dir is not None:
+        logging.info("Saving analysis results...")
+        
+        # Save region z-scores
+        np.save(save_dir / "hc_patient_z_scores.npy", hc_patient_z_scores)
+        np.save(save_dir / "patient_patient_z_scores.npy", patient_patient_z_scores)
+        
+        # Save top regions as CSV
+        if atlas_regions is not None:
+            hc_top_df = pd.DataFrame({
+                'Region': hc_top_regions['region_names'],
+                'Mean Z-Score': hc_top_regions['mean_z_scores']
+            })
+            hc_top_df.to_csv(save_dir / "hc_top_regions.csv", index=False)
+            
+            patient_top_df = pd.DataFrame({
+                'Region': patient_top_regions['region_names'],
+                'Mean Z-Score': patient_top_regions['mean_z_scores']
+            })
+            patient_top_df.to_csv(save_dir / "patient_top_regions.csv", index=False)
+    
+    # 6. Return results
+    analysis_results = {
+        "hc_patient_z_scores": hc_patient_z_scores,
+        "patient_patient_z_scores": patient_patient_z_scores,
+        "hc_top_regions": hc_top_regions,
+        "patient_top_regions": patient_top_regions,
+        "diagnosis_grouped": diagnosis_grouped
+    }
+    
+    return analysis_results
+
 def integrate_regional_analysis(bootstrap_models, train_data, patient_data, annotations_patients, 
                               atlas_name, save_dir):
     """
-    Integrate the regional analysis into the main script.
+    Integrate the regional analysis into the main script with improved data alignment
     
     Parameters:
     -----------
@@ -784,7 +1312,7 @@ def integrate_regional_analysis(bootstrap_models, train_data, patient_data, anno
         
     Returns:
     --------
-    None
+    dict: Analysis results
     """
     import logging
     import numpy as np
@@ -799,30 +1327,74 @@ def integrate_regional_analysis(bootstrap_models, train_data, patient_data, anno
         "HC": "Healthy Control"
     }
     
-    # Extract diagnoses from annotations
-    if "Diagnosis" in annotations_patients.columns:
-        patient_diagnoses = annotations_patients["Diagnosis"].tolist()
-    else:
-        logging.warning("No 'Diagnosis' column found in patient annotations. Using generic labels.")
-        patient_diagnoses = ["Unknown"] * len(patient_data)
-    
-    # Get region names for the atlas
-    atlas_regions = get_atlas_regions(atlas_name)
-    
     # Create a new directory for regional analysis
     regional_dir = Path(save_dir) / "regional_analysis"
     regional_dir.mkdir(exist_ok=True)
     
+    # Extract patient IDs - check for common ID column names
+    patient_ids = []
+    id_columns = ["ID", "PatientID", "SubjectID", "Subject_ID", "Patient_ID", "sample_id"]
+    id_column_found = None
+    
+    for col in id_columns:
+        if col in annotations_patients.columns:
+            patient_ids = annotations_patients[col].tolist()
+            id_column_found = col
+            print(f"Found patient IDs in column '{col}', total: {len(patient_ids)}")
+            break
+    
+    if not patient_ids:
+        logging.warning("No patient ID column found. Using generic IDs.")
+        patient_ids = [f"Patient_{i}" for i in range(len(annotations_patients))]
+    
+    # Extract diagnoses and patient IDs from annotations
+    patient_diagnoses = []
+    
+    if "Diagnosis" in annotations_patients.columns:
+        patient_diagnoses = annotations_patients["Diagnosis"].tolist()
+        print(f"Found {len(patient_diagnoses)} diagnoses in annotations")
+    else:
+        logging.warning("No 'Diagnosis' column found in patient annotations. Using generic labels.")
+        patient_diagnoses = ["Unknown"] * len(annotations_patients)
+    
+    # Generate sample IDs for our actual data (these might not match the annotation IDs)
+    sample_ids = [f"Sample_{i}" for i in range(len(patient_data))]
+    
+    # Check for dimension mismatch
+    if len(patient_diagnoses) != len(sample_ids):
+        logging.warning(f"Dimension mismatch: {len(sample_ids)} samples in data but {len(patient_diagnoses)} diagnoses in annotations")
+        
+        # If we have both patient IDs in annotations and an actual ID column in the data, we would align here
+        # For now, we'll just create an ID mapping for consistency
+        
+        # Check if we have the same number of patients in annotations and data
+        if len(annotations_patients) == len(patient_data):
+            logging.info("Same number of records in annotations and data. Creating 1:1 mapping.")
+            # Create a direct mapping between annotation rows and data samples
+            sample_to_patient = {sample_id: patient_id for sample_id, patient_id in zip(sample_ids, patient_ids)}
+        else:
+            logging.warning("Different number of records. Cannot establish reliable 1:1 mapping.")
+            # In a real scenario, you would have actual IDs in your data to match with annotations
+            sample_to_patient = {}
+    else:
+        # Direct 1:1 mapping
+        sample_to_patient = {sample_id: patient_id for sample_id, patient_id in zip(sample_ids, patient_ids)}
+    
+    # Get region names for the atlas
+    atlas_regions = get_atlas_regions(atlas_name)
+    
     # Run the regional analysis pipeline
     logging.info(f"Starting regional analysis for atlas: {atlas_name}")
     
-    from regional_deviation_analysis import run_regional_analysis_pipeline
+    #from regional_deviation_analysis import run_regional_analysis_pipeline
     
     analysis_results = run_regional_analysis_pipeline(
         bootstrap_models=bootstrap_models,
         healthy_data=train_data,
         patient_data=patient_data,
         patient_diagnoses=patient_diagnoses,
+        patient_ids=patient_ids,      # Pass patient IDs from annotations
+        sample_ids=sample_ids,        # Pass sample IDs for data alignment
         atlas_regions=atlas_regions,
         diagnosis_labels=diagnosis_labels,
         save_dir=regional_dir
@@ -831,3 +1403,4 @@ def integrate_regional_analysis(bootstrap_models, train_data, patient_data, anno
     logging.info(f"Regional analysis completed. Results saved to {regional_dir}")
     
     return analysis_results
+      
