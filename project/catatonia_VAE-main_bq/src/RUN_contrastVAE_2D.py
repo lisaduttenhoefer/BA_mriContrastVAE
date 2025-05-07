@@ -4,7 +4,7 @@ import matplotlib
 import numpy as np
 import pandas as pd
 import argparse
-
+from datetime import datetime
 sys.path.append("../src")
 import torch
 import torchio as tio
@@ -30,35 +30,48 @@ from utils.logging_utils import (
 # Use non-interactive plotting to avoid tmux crashes
 matplotlib.use("Agg")
 
-def create_arg_parser():  # For training several different models with run_training.sh file
-    parser = argparse.ArgumentParser(description='Arguments')
+def create_arg_parser():
+    parser = argparse.ArgumentParser(description='Arguments for Normative Modeling Training')
     parser.add_argument('--atlas_name', help='Name of the desired atlas for training.')
-    parser.add_argument('--num_epochs', help='Number of epochs to be trained for')
+    parser.add_argument('--num_epochs', help='Number of epochs to be trained for', type=int, default=20)
+    parser.add_argument('--batch_size', help='Batch size', type=int, default=32)
+    parser.add_argument('--learning_rate', help='Learning rate', type=float, default=4e-5)
+    parser.add_argument('--latent_dim', help='Dimension of latent space', type=int, default=20)
+    parser.add_argument('--kldiv_weight', help='Weight for KL divergence loss', type=float, default=4.0)
+    parser.add_argument('--seed', help='Random seed for reproducibility', type=int, default=42)
+    parser.add_argument('--output_dir', help='Override default output directory', default=None)
     return parser
 
 path_original = "/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/metadata_20250110/full_data_train_valid_test.csv"
 path_to_dir = "/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data_training"
 TRAIN_CSV, TEST_CSV = split_df(path_original, path_to_dir)
 
-def main(atlas_name: str, num_epochs: int):
+def main(atlas_name: str, num_epochs: int, batch_size: int, learning_rate: float, 
+         latent_dim: int, kldiv_weight: float, seed: int, output_dir: str = None):
     ## 0. Set Up ----------------------------------------------------------
     # Set Parameters for model training
     # Config has default parameters you may want to check
-
+    if output_dir is None:
+        save_dir = f"/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/normative_results_{timestamp}"
+    else:
+        save_dir = output_dir
     # Split the original metadata csv file that contains all data into two separate ones: training metadata and testing metadata.
-    
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     
     config = Config_2D(
         # General Parameters
-        RUN_NAME="BasicVAE_2D_training01",
+        RUN_NAME=f"NormativeVAE_{atlas_name}_{timestamp}",
         # Input / Output Paths
-        TRAIN_CSV= ["/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data_training/training_metadata.csv"], #"/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data_training/hc_metadata.csv", # TEST_CSV=["./data/relevant_metadata/testing_metadata.csv"],
-        TEST_CSV= ["/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data_training/s"], #"/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data_training/non_hc_metadata.csv",
-        MRI_DATA_PATH="/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data/train_xml_data", #"./data/raw_extracted_xml_data/train_xml_data", # This is the h5 file!
-        METADATA_WHOLE = "/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/metadata_20250110/full_data_train_valid_test.csv",
+        TRAIN_CSV=["/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data_training/training_metadata.csv"],
+        TEST_CSV=["/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data_training/testing_metadata.csv"],
+        MRI_DATA_PATH_TRAIN="/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data/train_xml_data",
+        MRI_DATA_PATH_TEST="/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data/test_xml_data",
         ATLAS_NAME=atlas_name,
         PROC_DATA_PATH="/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data_training/proc_extracted_xml_data",
-        OUTPUT_DIR="/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/analysis",
+        OUTPUT_DIR=save_dir,
+        # load_mri_data parameters
+        VOLUME_TYPE= "Vgm",
+        VALID_VOLUME_TYPES=["Vgm", "Vwm", "csf"],
         # Loading Model
         LOAD_MODEL=False,
         PRETRAIN_MODEL_PATH=None,
@@ -66,19 +79,17 @@ def main(atlas_name: str, num_epochs: int):
         CONTINUE_FROM_EPOCH=0,
         # Loss Parameters
         RECON_LOSS_WEIGHT=40.0,
-        KLDIV_LOSS_WEIGHT=4.0,
-        CONTR_LOSS_WEIGHT=0.0,  # if not zero, you're not running basicVAE
-        #USE_SSIM=True,
+        KLDIV_LOSS_WEIGHT=kldiv_weight,
+        CONTR_LOSS_WEIGHT=0.0,  # No contrastive loss for normative model
         # Learning and Regularization
         TOTAL_EPOCHS=num_epochs,
-        LEARNING_RATE=4e-5,
+        LEARNING_RATE=learning_rate,
         WEIGHT_DECAY=4e-3,
         EARLY_STOPPING=True,
         STOP_LEARNING_RATE=4e-8,
         SCHEDULE_ON_VALIDATION=True,
         SCHEDULER_PATIENCE=6,
         SCHEDULER_FACTOR=0.5,
-        #DROPOUT_PROB=0.1,
         # Visualization
         CHECKPOINT_INTERVAL=5,
         DONT_PLOT_N_EPOCHS=0,
@@ -86,16 +97,17 @@ def main(atlas_name: str, num_epochs: int):
         UMAP_DOT_SIZE=20,
         METRICS_ROLLING_WINDOW=10,
         # Data Parameters
-        BATCH_SIZE=32,
-        DIAGNOSES=["HC"], 
-        #COVARS=["Dataset"],
+        BATCH_SIZE=batch_size,
+        DIAGNOSES=["HC"],  # For normative modeling, we train on healthy controls
         # Misc.
-        LATENT_DIM=20,
-        SHUFFLE_DATA=False
+        LATENT_DIM=latent_dim,
+        SHUFFLE_DATA=True,
+        SEED=seed
     )
 
     # Set up logging
     setup_logging(config)
+    
 
     # Set seed for reproducibility
     torch.manual_seed(config.SEED)
@@ -110,7 +122,7 @@ def main(atlas_name: str, num_epochs: int):
     if config.ATLAS_NAME != "all":
         subjects, annotations = load_mri_data_2D(
             csv_paths=config.TRAIN_CSV,
-            data_path=config.MRI_DATA_PATH,
+            data_path=config.MRI_DATA_PATH_TRAIN,
             atlas_name=config.ATLAS_NAME,
             # covars=config.COVARS,
             diagnoses=config.DIAGNOSES,
@@ -119,7 +131,7 @@ def main(atlas_name: str, num_epochs: int):
             save=True
         )
     else:
-        all_data_paths = get_all_data(directory=config.MRI_DATA_PATH, ext="h5")
+        all_data_paths = get_all_data(directory=config.MRI_DATA_PATH_TRAIN, ext="h5")
         
         subjects, annotations = load_mri_data_2D_all_atlases(
             csv_paths=config.TRAIN_CSV,

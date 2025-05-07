@@ -3,6 +3,7 @@ sys.path.append("/home/developer/.local/lib/python3.10/site-packages")
 import matplotlib
 import numpy as np
 import pandas as pd
+import matplotlib.pyplot as plt
 import argparse
 import os
 from datetime import datetime
@@ -12,8 +13,19 @@ sys.path.append("../src")
 import torch
 import torchio as tio
 from torch.cuda.amp import GradScaler
+import pandas as pd
+import scanpy as sc
+import seaborn as sns
+import torchio as tio
+from torch.utils.data import DataLoader
+from sklearn.decomposition import PCA
+from sklearn.manifold import TSNE
+import umap
+# Set non-interactive plotting to avoid tmux crashes
+matplotlib.use("Agg")
 
 sys.path.append("../src")
+
 from models.ContrastVAE_2D_f import ContrastVAE_2D
 from utils.support_f import get_all_data, split_df, combine_dfs
 from utils.config_utils_model import Config_2D
@@ -36,31 +48,23 @@ from utils.logging_utils import (
     log_atlas_mode
 )
 
+from utils.plotting_utils import (
+    plot_latent_space,
+    plot_learning_curves,
+    plot_bootstrap_metrics,
+)
+
 from models.ContrastVAE_2D_dev import (
     NormativeVAE, 
-    train_normative_model,
-    bootstrap_train_normative_models, 
-    compute_deviation_scores,
-    visualize_deviation_scores,
-    plot_deviation_maps,
-    run_normative_modeling_pipeline,
-    run_regional_analysis_pipeline,
-    get_atlas_regions, 
-    integrate_regional_analysis,
-    #compute_regional_deviations, 
-    identify_top_deviant_regions,
-    region_distribution_by_diagnosis, 
-    create_region_heatmap,
-    create_diagnosis_region_heatmap, 
-    visualize_region_deviations,
-
+    train_normative_model_plots,
+    bootstrap_train_normative_models_plots
 )
 
 # Use non-interactive plotting to avoid tmux crashes
 matplotlib.use("Agg")
 
 def create_arg_parser():
-    parser = argparse.ArgumentParser(description='Arguments for Normative Modeling')
+    parser = argparse.ArgumentParser(description='Arguments for Normative Modeling Training')
     parser.add_argument('--atlas_name', help='Name of the desired atlas for training.')
     parser.add_argument('--num_epochs', help='Number of epochs to be trained for', type=int, default=20)
     parser.add_argument('--n_bootstraps', help='Number of bootstrap samples', type=int, default=50)
@@ -71,10 +75,18 @@ def create_arg_parser():
     parser.add_argument('--save_models', help='Save all bootstrap models', action='store_true')
     parser.add_argument('--no_cuda', help='Disable CUDA (use CPU only)', action='store_true')
     parser.add_argument('--seed', help='Random seed for reproducibility', type=int, default=42)
+    parser.add_argument('--output_dir', help='Override default output directory', default=None)
     return parser
 
+def extract_measurements(subjects):
+    """Extract measurements from subjects as torch tensors."""
+    all_measurements = []
+    for subject in subjects:
+        all_measurements.append(torch.tensor(subject["measurements"]).squeeze())
+    return torch.stack(all_measurements)
+
 def main(atlas_name: str, num_epochs: int, n_bootstraps: int, batch_size: int, learning_rate: float, 
-         latent_dim: int, kldiv_weight: float, save_models: bool, no_cuda: bool, seed: int):
+         latent_dim: int, kldiv_weight: float, save_models: bool, no_cuda: bool, seed: int, output_dir: str = None):
     ## 0. Set Up ----------------------------------------------------------
     # Set main paths
     path_original = "/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/metadata_20250110/full_data_train_valid_test.csv"
@@ -87,21 +99,28 @@ def main(atlas_name: str, num_epochs: int, n_bootstraps: int, batch_size: int, l
         save_dir = f"/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/normative_results_{timestamp}"
     else:
         save_dir = output_dir
-
+        
+    os.makedirs(save_dir, exist_ok=True)
+    os.makedirs(f"{save_dir}/models", exist_ok=True)
+    os.makedirs(f"{save_dir}/figures", exist_ok=True)
+    os.makedirs(f"{save_dir}/figures/latent_space", exist_ok=True)
+    os.makedirs(f"{save_dir}/figures/reconstructions", exist_ok=True)
+    #os.makedirs(f"{save_dir}/figures/loss_curves", exist_ok=True)
+    os.makedirs(f"{save_dir}/logs", exist_ok=True)
+    os.makedirs(f"{save_dir}/data", exist_ok=True)    
     # Set up configuration for the normative modeling
     config = Config_2D(
         # General Parameters
-        RUN_NAME=f"NormativeVAE_{atlas_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+        RUN_NAME=f"NormativeVAE_{atlas_name}_{timestamp}",
         # Input / Output Paths
         TRAIN_CSV=["/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data_training/training_metadata.csv"],
         TEST_CSV=["/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data_training/testing_metadata.csv"],
         MRI_DATA_PATH_TRAIN="/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data/train_xml_data",
         MRI_DATA_PATH_TEST="/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data/test_xml_data",
-        #METADATA_WHOLE="/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/metadata_20250110/full_data_train_valid_test.csv",
         ATLAS_NAME=atlas_name,
         PROC_DATA_PATH="/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data_training/proc_extracted_xml_data",
-        OUTPUT_DIR="/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/normative_results",
-        #load_mri_data
+        OUTPUT_DIR=save_dir,
+        # load_mri_data parameters
         VOLUME_TYPE= "Vgm",
         VALID_VOLUME_TYPES=["Vgm", "Vwm", "csf"],
         # Loading Model
@@ -141,15 +160,9 @@ def main(atlas_name: str, num_epochs: int, n_bootstraps: int, batch_size: int, l
     hidden_dim_2 = 100
 
     # Set up logging
+    log_file = f"{save_dir}/logs/{timestamp}_normative_training.log"
     setup_logging(config)
     log_and_print(f"Starting normative modeling with atlas: {atlas_name}, epochs: {num_epochs}, bootstraps: {n_bootstraps}")
-
-    # Create output directories
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    save_dir = f"{config.OUTPUT_DIR}_{timestamp}"
-    os.makedirs(save_dir, exist_ok=True)
-    os.makedirs(f"{save_dir}/models", exist_ok=True)
-    os.makedirs(f"{save_dir}/figures", exist_ok=True)
 
     # Save configuration
     config_dict = vars(config)
@@ -183,25 +196,8 @@ def main(atlas_name: str, num_epochs: int, n_bootstraps: int, batch_size: int, l
             volume_type=config.VOLUME_TYPE,
             valid_volume_types=config.VALID_VOLUME_TYPES,
         )
-        
-        
-        # Load patient data (non-HC)
-        log_and_print("Loading patient data...")
-        subjects_patients, annotations_patients = load_mri_data_2D(
-            csv_paths=config.TEST_CSV,
-            data_path=config.MRI_DATA_PATH_TEST,
-            atlas_name=config.ATLAS_NAME,
-            diagnoses=["CTT", "SCHZ", "MDD"],  # Add all patient diagnoses you want to test
-            hdf5=True,
-            train_or_test="test",
-            save=True,
-            volume_type= config.VOLUME_TYPE,
-            valid_volume_types= config.VALID_VOLUME_TYPES,
-        )
-
     else:
         all_data_paths_train = get_all_data(directory=config.MRI_DATA_PATH_TRAIN, ext="h5")
-        all_data_paths_test = get_all_data(directory=config.MRI_DATA_PATH_TEST, ext="h5")
 
         # We assume there's a function load_mri_data_2D_all_atlases similar to the one in your original code
         subjects_hc, annotations_hc = load_mri_data_2D_all_atlases(
@@ -212,16 +208,6 @@ def main(atlas_name: str, num_epochs: int, n_bootstraps: int, batch_size: int, l
             train_or_test="train",
             volume_type=config.VOLUME_TYPE,
             valid_volume_types=config.VALID_VOLUME_TYPES,
-        )
-        
-        subjects_patients, annotations_patients = load_mri_data_2D_all_atlases(
-            csv_paths=config.TEST_CSV,
-            data_paths=all_data_paths_test,
-            diagnoses=["CTT", "SCHZ", "MDD"],
-            hdf5=True,
-            train_or_test="test", 
-            volume_type= config.VOLUME_TYPE,
-            valid_volume_types= config.VALID_VOLUME_TYPES,
         )
 
     len_atlas = len(subjects_hc[0]["measurements"])
@@ -253,13 +239,14 @@ def main(atlas_name: str, num_epochs: int, n_bootstraps: int, batch_size: int, l
             "Diagnosis": "category",
             "Sex": "category",
             "Data_Type": "category",
-            #"Augmented": "bool",
             "Filename": "category",
-            #"OG_Filename": "category",
         }
     )
 
     log_and_print(annotations)
+    # Save the processed annotations for later use
+    #annotations.to_csv(f"{save_dir}/data/processed_annotations.csv", index=False)
+
 
     # Prepare data loaders
     train_loader_hc = process_subjects(
@@ -273,12 +260,6 @@ def main(atlas_name: str, num_epochs: int, n_bootstraps: int, batch_size: int, l
         batch_size=config.BATCH_SIZE,
         shuffle_data=False,
     )
-    
-    patient_loader = process_subjects(
-        subjects=subjects_patients,
-        batch_size=config.BATCH_SIZE,
-        shuffle_data=False,
-    )
 
     # Log the used atlas and the number of ROIs
     log_atlas_mode(atlas_name=config.ATLAS_NAME, num_rois=len_atlas)
@@ -288,34 +269,24 @@ def main(atlas_name: str, num_epochs: int, n_bootstraps: int, batch_size: int, l
         datasets={
             "Training Data (HC)": len(train_subjects_hc),
             "Validation Data (HC)": len(valid_subjects_hc),
-            "Patient Data": len(subjects_patients),
         }
     )
-
+    
     ## 2. Prepare and Run Normative Modeling Pipeline --------------------------------
     # Initialize Model
     log_model_setup()
     
-    # Create a list to store all models for bootstrapping
-    bootstrap_models = []
-    
     # Extract features as torch tensors
-    # Convert data to tensors
-    def extract_measurements(subjects):
-        all_measurements = []
-        for subject in subjects:
-            #all_measurements.append(subject["measurements"].squeeze())
-            all_measurements.append(torch.tensor(subject["measurements"]).squeeze())
-        return torch.stack(all_measurements)
-    
-    # Extract measurements
     train_data = extract_measurements(train_subjects_hc)
     valid_data = extract_measurements(valid_subjects_hc)
-    patient_data = extract_measurements(subjects_patients)
     
     log_and_print(f"Training data shape: {train_data.shape}")
     log_and_print(f"Validation data shape: {valid_data.shape}")
-    log_and_print(f"Patient data shape: {patient_data.shape}")
+
+    # Save processed data tensors for future use
+    torch.save(train_data, f"{save_dir}/data/train_data_tensor.pt")
+    torch.save(valid_data, f"{save_dir}/data/valid_data_tensor.pt")
+    
     
     # Initialize the normative VAE model
     normative_model = NormativeVAE(
@@ -330,77 +301,191 @@ def main(atlas_name: str, num_epochs: int, n_bootstraps: int, batch_size: int, l
     )
     
     log_model_ready(normative_model)
+      
+    # Save initial model architecture visualization
+    try:
+        from torchviz import make_dot
+        sample_input = train_data[:1].to(device)
+        output, mu, log_var = normative_model(sample_input)
+        dot = make_dot(output, params=dict(normative_model.named_parameters()))
+        dot.format = 'png'
+        dot.render(f"{save_dir}/figures/model_architecture")
+        log_and_print(f"Model architecture visualization saved to {save_dir}/figures/model_architecture.png")
+    except ImportError:
+        log_and_print("torchviz not available, skipping model architecture visualization")
     
-    log_and_print("Running normative modeling pipeline...")
-    # Run the normative modeling pipeline
-    bootstrap_models, hc_global_z, patient_global_z = run_normative_modeling_pipeline(
-        healthy_data=train_data,
-        patient_data=patient_data,
-        contrastvae=None,  # No pre-trained ContrastVAE
+    # Before bootstrap training, train and evaluate a single baseline model for reference
+    log_and_print("Training baseline model before bootstrap training...")
+    baseline_model, baseline_history = train_normative_model_plots(
+        train_data=train_data,
+        valid_data=valid_data,
+        model=normative_model,
+        epochs=num_epochs,
+        batch_size=batch_size,
+        save_best=True,
+        return_history=True
+    )
+    
+    # Save baseline model
+    torch.save(baseline_model.state_dict(), f"{save_dir}/models/baseline_model.pt")
+    
+    # # Plot baseline model learning curves
+    # plot_learning_curves(
+    #     baseline_history['train_loss'],
+    #     baseline_history['val_loss'],
+    #     baseline_history['kl_loss'],
+    #     baseline_history['recon_loss'],
+    #     os.path.join(save_dir, "figures", "baseline_learning_curves.png")
+    # )
+    
+    # # Generate latent space visualization for baseline model
+    # baseline_model.eval()
+    # with torch.no_grad():
+    #     # Combine training and validation data
+    #     combined_data = torch.cat([train_data, valid_data], dim=0)
+    #     combined_labels = torch.cat([torch.zeros(train_data.shape[0]), torch.ones(valid_data.shape[0])])
+        
+    #     # Get latent representations
+    #     combined_data_tensor = combined_data.to(device)
+    #     features = baseline_model.encoder(combined_data_tensor)
+    #     mu = baseline_model.fc_mu(features)
+    #     log_var = baseline_model.fc_var(features)
+    #     latent_vectors = baseline_model.reparameterize(mu, log_var)
+        
+    #     # Get reconstructions
+    #     valid_data_tensor = valid_data.to(device)
+    #     valid_recon, _, _ = baseline_model(valid_data_tensor)
+    
+    # # Plot baseline latent space
+    # plot_latent_space(
+    #     latent_vectors=latent_vectors,
+    #     labels=combined_labels,
+    #     save_path=os.path.join(save_dir, "figures", "baseline_latent_tsne.png"),
+    #     method='tsne',
+    #     title='Baseline Model (Train=0, Valid=1)'
+    # )
+    
+    # plot_latent_space(
+    #     latent_vectors=latent_vectors,
+    #     labels=combined_labels,
+    #     save_path=os.path.join(save_dir, "figures", "baseline_latent_umap.png"),
+    #     method='umap',
+    #     title='Baseline Model (Train=0, Valid=1)'
+    # )
+    
+    # # Plot baseline reconstructions
+    # plot_reconstruction_samples(
+    #     original=valid_data_tensor[:5],
+    #     reconstructed=valid_recon[:5],
+    #     save_path=os.path.join(save_dir, "figures", "baseline_reconstructions.png")
+    # )
+    
+    # Train bootstrap models
+    log_and_print("Training bootstrap models...")
+    bootstrap_models, bootstrap_metrics = bootstrap_train_normative_models_plots(
+        train_data=train_data,
+        valid_data=valid_data,
+        model=normative_model,
         n_bootstraps=n_bootstraps,
-        train_epochs=num_epochs,
-        batch_size=config.BATCH_SIZE,
-        save_dir=save_dir,
+        epochs=num_epochs,
+        batch_size=batch_size,
         #device=device,
+        save_dir=save_dir,
         save_models=save_models
     )
     
-    # Create additional visualizations
-    log_and_print("Creating additional visualizations...")
+    log_and_print(f"Successfully trained {len(bootstrap_models)} bootstrap models")
+
+
+    # Calculate and visualize overall performance
+    metrics_df = pd.DataFrame(bootstrap_metrics)
     
-    # Save global deviation scores
+    # Create summary statistics visualization
+    plt.figure(figsize=(15, 10))
     
-    np.save(f"{save_dir}/hc_global_z_scores.npy", hc_global_z)
-    np.save(f"{save_dir}/patient_global_z_scores.npy", patient_global_z)
+    metrics_to_plot = [
+        ('final_val_loss', 'Validation Loss'), 
+        ('final_train_loss', 'Training Loss'),
+        ('final_recon_loss', 'Reconstruction Loss'), 
+        ('final_kl_loss', 'KL Divergence Loss')
+    ]
     
-    # Boxplot of Z-Scores for both groups
-    visualize_deviation_scores(
-        hc_scores=hc_global_z,
-        patient_scores=patient_global_z,
-        save_path=f"{save_dir}/figures/global_deviation_scores.png",
-        title=f"Global Deviation Scores - {atlas_name}"
+    # for i, (metric, title) in enumerate(metrics_to_plot):
+    #     plt.subplot(2, 2, i+1)
+    #     sns.boxplot(y=metrics_df[metric])
+    #     plt.title(f'Distribution of {title}')
+    #     plt.grid(True)
+        
+    #     # Add summary statistics as text
+    #     mean_val = metrics_df[metric].mean()
+    #     std_val = metrics_df[metric].std()
+    #     min_val = metrics_df[metric].min()
+    #     max_val = metrics_df[metric].max()
+        
+    #     stats_text = f"Mean: {mean_val:.4f}\nStd: {std_val:.4f}\nMin: {min_val:.4f}\nMax: {max_val:.4f}"
+    #     plt.text(0.05, 0.95, stats_text, transform=plt.gca().transAxes, 
+    #             verticalalignment='top', bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+    
+    # plt.tight_layout()
+    # plt.savefig(os.path.join(save_dir, "figures", "bootstrap_performance_summary.png"))
+    # plt.close()
+    
+    # # Create correlation matrix of metrics
+    # plt.figure(figsize=(10, 8))
+    # corr_matrix = metrics_df[['final_train_loss', 'final_val_loss', 'final_recon_loss', 'final_kl_loss', 'best_epoch']].corr()
+    # sns.heatmap(corr_matrix, annot=True, cmap='coolwarm', vmin=-1, vmax=1)
+    # plt.title('Correlation Matrix of Model Metrics')
+    # plt.tight_layout()
+    # plt.savefig(os.path.join(save_dir, "figures", "metrics_correlation.png"))
+    # plt.close()
+    
+    # Save training metadata
+    training_metadata = {
+        "atlas_name": atlas_name,
+        "num_epochs": num_epochs,
+        "n_bootstraps": n_bootstraps,
+        "batch_size": batch_size,
+        "learning_rate": learning_rate,
+        "latent_dim": latent_dim,
+        "kldiv_weight": kldiv_weight,
+        "hidden_dim_1": hidden_dim_1,
+        "hidden_dim_2": hidden_dim_2,
+        "input_dim": len_atlas,
+        "train_samples": len(train_subjects_hc),
+        "valid_samples": len(valid_subjects_hc),
+        "best_model_val_loss": baseline_history['best_val_loss'],
+        "best_model_epoch": baseline_history['best_epoch'],
+        "bootstrap_mean_val_loss": metrics_df['final_val_loss'].mean(),
+        "bootstrap_std_val_loss": metrics_df['final_val_loss'].std(),
+        "device": str(device),
+        "timestamp": timestamp
+    }
+    
+    pd.DataFrame([training_metadata]).to_csv(f"{save_dir}/training_metadata.csv", index=False)
+    
+    log_and_print(f"Normative modeling training completed successfully!\nResults saved to {save_dir}")
+    
+    return save_dir, bootstrap_models, bootstrap_metrics
+
+if __name__ == "__main__":
+    # Parse command line arguments
+    parser = create_arg_parser()
+    args = parser.parse_args()
+    
+    # Run the main function with parsed arguments
+    save_dir, bootstrap_models, bootstrap_metrics = main(
+        atlas_name=args.atlas_name,
+        num_epochs=args.num_epochs,
+        n_bootstraps=args.n_bootstraps,
+        batch_size=args.batch_size,
+        learning_rate=args.learning_rate,
+        latent_dim=args.latent_dim,
+        kldiv_weight=args.kldiv_weight,
+        save_models=args.save_models,
+        no_cuda=args.no_cuda,
+        seed=args.seed,
+        output_dir=args.output_dir
     )
     
-  
-    # Normative Modellierung ist fertig — jetzt regionale Analyse:
-    regional_analysis_results = integrate_regional_analysis(
-        bootstrap_models=bootstrap_models,
-        train_data=train_data,
-        patient_data=patient_data,
-        annotations_patients=annotations_patients,
-        atlas_name=atlas_name,
-        save_dir=save_dir
-    )
-
-    log_and_print(f"Normative modeling pipeline completed successfully!\nResults saved to {save_dir}")
-    
-
-
-if __name__ == "__main__": 
-    arg_parser = create_arg_parser()
-    parsed_args = arg_parser.parse_args(sys.argv[1:])
-    
-    atlas_name = str(parsed_args.atlas_name) if parsed_args.atlas_name else "AAL"
-    num_epochs = int(parsed_args.num_epochs)
-    n_bootstraps = int(parsed_args.n_bootstraps)
-    batch_size = int(parsed_args.batch_size)
-    learning_rate = float(parsed_args.learning_rate)
-    latent_dim = int(parsed_args.latent_dim)
-    kldiv_weight = float(parsed_args.kldiv_weight)
-    save_models = parsed_args.save_models
-    no_cuda = parsed_args.no_cuda
-    seed = int(parsed_args.seed)
-    
-    main(
-        atlas_name=atlas_name, 
-        num_epochs=num_epochs, 
-        n_bootstraps=n_bootstraps, 
-        batch_size=batch_size, 
-        learning_rate=learning_rate, 
-        latent_dim=latent_dim, 
-        kldiv_weight=kldiv_weight, 
-        save_models=save_models, 
-        no_cuda=no_cuda, 
-        seed=seed
-    )
-
+    # Final log message
+    print(f"Normative modeling complete. Results saved to {save_dir}")

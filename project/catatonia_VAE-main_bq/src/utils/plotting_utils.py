@@ -4,7 +4,7 @@ import random as rd
 import warnings
 from datetime import datetime, timedelta
 from typing import Dict, List, Literal
-
+import numpy as np
 import anndata as ad
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -12,6 +12,9 @@ import scanpy as sc
 import seaborn as sns
 import torchio as tio
 from torch.utils.data import DataLoader
+from sklearn.decomposition import PCA
+from sklearn.manifold import TSNE
+import umap
 
 from module.data_processing_hc import load_mri_data_2D
 from utils.logging_utils import log_and_print
@@ -928,3 +931,146 @@ def intensity_hist_plot(
 
     plt.tight_layout()
     plt.show()
+
+def plot_latent_space(latent_vectors, labels, save_path, method='tsne', title='Latent Space Visualization'):
+    """
+    Visualize the latent space using t-SNE or UMAP.
+    
+    Args:
+        latent_vectors: Latent vectors from the VAE model
+        labels: Labels for coloring points (e.g., diagnosis, datasets)
+        save_path: Path to save the figure
+        method: 'tsne' or 'umap'
+        title: Title for the plot
+    """
+    plt.figure(figsize=(10, 8))
+    
+    if method == 'tsne':
+        tsne = TSNE(n_components=2, random_state=42)
+        reduced_data = tsne.fit_transform(latent_vectors.detach().cpu().numpy())
+        plt.title(f"t-SNE {title}")
+    else:  # umap
+        reducer = umap.UMAP(random_state=42)
+        reduced_data = reducer.fit_transform(latent_vectors.detach().cpu().numpy())
+        plt.title(f"UMAP {title}")
+    
+    # Create scatter plot
+    unique_labels = np.unique(labels)
+    cmap = plt.cm.get_cmap('tab10', len(unique_labels))
+    
+    for i, label in enumerate(unique_labels):
+        mask = labels == label
+        plt.scatter(reduced_data[mask, 0], reduced_data[mask, 1], 
+                    c=[cmap(i)], label=str(label), alpha=0.7)
+    
+    plt.colorbar(ticks=range(len(unique_labels)), 
+                 label='Labels')
+    plt.xlabel('Dimension 1')
+    plt.ylabel('Dimension 2')
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(save_path)
+    plt.close()
+    
+    return reduced_data
+
+def plot_learning_curves(train_losses, val_losses, kl_losses, recon_losses, save_path):
+    """
+    Plot training and validation loss curves.
+    
+    Args:
+        train_losses: List of training losses
+        val_losses: List of validation losses
+        kl_losses: List of KL divergence losses
+        recon_losses: List of reconstruction losses
+        save_path: Path to save the figure
+    """
+    plt.figure(figsize=(15, 10))
+    
+    # Total loss
+    plt.subplot(2, 2, 1)
+    plt.plot(train_losses, label='Training Loss')
+    plt.plot(val_losses, label='Validation Loss')
+    plt.title('Total Loss')
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss')
+    plt.grid(True)
+    plt.legend()
+    
+    # Reconstruction loss
+    plt.subplot(2, 2, 2)
+    plt.plot(recon_losses, label='Reconstruction Loss')
+    plt.title('Reconstruction Loss')
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss')
+    plt.grid(True)
+    plt.legend()
+    
+    # KL divergence loss
+    plt.subplot(2, 2, 3)
+    plt.plot(kl_losses, label='KL Divergence Loss')
+    plt.title('KL Divergence Loss')
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss')
+    plt.grid(True)
+    plt.legend()
+    
+    # Log scale for total loss
+    plt.subplot(2, 2, 4)
+    plt.semilogy(train_losses, label='Training Loss (log scale)')
+    plt.semilogy(val_losses, label='Validation Loss (log scale)')
+    plt.title('Total Loss (Log Scale)')
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss (log)')
+    plt.grid(True)
+    plt.legend()
+    
+    plt.tight_layout()
+    plt.savefig(save_path)
+    plt.close()
+
+
+def plot_bootstrap_metrics(bootstrap_metrics, save_path):
+    """
+    Plot metrics from bootstrap models.
+    
+    Args:
+        bootstrap_metrics: List of dictionaries containing metrics for each bootstrap model
+        save_path: Path to save the figure
+    """
+    df = pd.DataFrame(bootstrap_metrics)
+    
+    plt.figure(figsize=(15, 10))
+    
+    # Final loss distribution
+    plt.subplot(2, 2, 1)
+    sns.histplot(df['final_val_loss'], kde=True)
+    plt.title('Distribution of Final Validation Loss')
+    plt.xlabel('Validation Loss')
+    plt.grid(True)
+    
+    # Final KL loss distribution
+    plt.subplot(2, 2, 2)
+    sns.histplot(df['final_kl_loss'], kde=True)
+    plt.title('Distribution of Final KL Divergence Loss')
+    plt.xlabel('KL Loss')
+    plt.grid(True)
+    
+    # Final reconstruction loss distribution
+    plt.subplot(2, 2, 3)
+    sns.histplot(df['final_recon_loss'], kde=True)
+    plt.title('Distribution of Final Reconstruction Loss')
+    plt.xlabel('Reconstruction Loss')
+    plt.grid(True)
+    
+    # Best epoch distribution
+    plt.subplot(2, 2, 4)
+    sns.histplot(df['best_epoch'], kde=False, discrete=True)
+    plt.title('Distribution of Best Epochs')
+    plt.xlabel('Epoch')
+    plt.grid(True)
+    
+    plt.tight_layout()
+    plt.savefig(save_path)
+    plt.close()
+

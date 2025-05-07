@@ -18,6 +18,21 @@ try:
 except ImportError:
     HAS_ANNDATA = False
 
+from utils.logging_utils import (
+    log_and_print,
+    log_data_loading,
+    log_model_ready,
+    log_model_setup,
+    setup_logging,
+    log_atlas_mode
+)
+from utils.plotting_utils import (
+    plot_latent_space,
+    plot_learning_curves,
+    plot_bootstrap_metrics,
+)
+
+
 # NormativeVAE class
 class NormativeVAE(nn.Module):
     def __init__(
@@ -39,7 +54,8 @@ class NormativeVAE(nn.Module):
         
         # Store important parameters for later
         self.input_dim = input_dim
-        self.hidden_dims = [hidden_dim_1, hidden_dim_2]
+        self.hidden_dim_1 = hidden_dim_1
+        self.hidden_dim_2 = hidden_dim_2
         self.latent_dim = latent_dim
         
         # Encoder
@@ -352,79 +368,665 @@ def train_normative_model(model, healthy_train_loader, healthy_val_loader, epoch
 
 
 # Bootstrap training for normative models
-def bootstrap_train_normative_models(model_class, healthy_data, input_dim, n_bootstraps=100, epochs=50, batch_size=32, device=None):
+# def bootstrap_train_normative_models(model_class, healthy_data, input_dim, n_bootstraps=100, epochs=50, batch_size=32, device=None):
+#     """
+#     Train multiple normative models with bootstrap resampling
+    
+#     Args:
+#         model_class: Model class (NormativeVAE)
+#         healthy_data: Healthy control data as tensor
+#         input_dim: Input dimension
+#         n_bootstraps: Number of bootstrap samples
+#         epochs: Number of training epochs per bootstrap
+#         batch_size: Batch size
+#         device: Device for training
+    
+#     Returns:
+#         bootstrap_models: List of trained models
+#     """
+#     if device is None:
+#         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    
+#     print(f"Training {n_bootstraps} bootstrap models on {device}...")
+    
+#     # List for trained models
+#     bootstrap_models = []
+    
+#     for b in range(n_bootstraps):
+#         print(f"\nBootstrap {b+1}/{n_bootstraps}")
+        
+#         # Create bootstrap sample with replacement
+#         n_samples = len(healthy_data)
+#         bootstrap_indices = resample(range(n_samples), replace=True, n_samples=n_samples)
+#         bootstrap_data = healthy_data[bootstrap_indices]
+        
+#         # Train-val split
+#         n_val = int(0.2 * len(bootstrap_data))
+#         val_indices = np.random.choice(len(bootstrap_data), n_val, replace=False)
+#         train_indices = np.array([i for i in range(len(bootstrap_data)) if i not in val_indices])
+        
+#         train_data = bootstrap_data[train_indices]
+#         val_data = bootstrap_data[val_indices]
+        
+#         # Create DataLoaders
+#         train_loader = DataLoader(
+#             TensorDataset(train_data),
+#             batch_size=batch_size,
+#             shuffle=True
+#         )
+        
+#         val_loader = DataLoader(
+#             TensorDataset(val_data),
+#             batch_size=batch_size,
+#             shuffle=False
+#         )
+        
+#         # Initialize new model
+#         bootstrap_model = model_class(
+#             input_dim=input_dim,
+#             device=device
+#         )
+        
+#         # Train model
+#         bootstrap_model, _ = train_normative_model(
+#             model=bootstrap_model,
+#             healthy_train_loader=train_loader,
+#             healthy_val_loader=val_loader,
+#             epochs=epochs,
+#             early_stopping_patience=10
+#         )
+        
+#         # Save trained model
+#         bootstrap_models.append(bootstrap_model)
+    
+#     return bootstrap_models
+def bootstrap_train_normative_models(
+    train_data,
+    valid_data,
+    model,
+    n_bootstraps=50,
+    epochs=20,
+    batch_size=32,
+    device=torch.device("cuda"),
+    save_dir=None,
+    save_models=False
+):
     """
     Train multiple normative models with bootstrap resampling
     
     Args:
-        model_class: Model class (NormativeVAE)
-        healthy_data: Healthy control data as tensor
-        input_dim: Input dimension
+        train_data: Training data tensor with healthy control measurements
+        valid_data: Validation data tensor with healthy control measurements
+        model: Base model instance to use as template (NormativeVAE)
         n_bootstraps: Number of bootstrap samples
         epochs: Number of training epochs per bootstrap
-        batch_size: Batch size
-        device: Device for training
-    
+        batch_size: Batch size for training
+        device: Device for training (cuda/cpu)
+        save_dir: Directory to save models and results
+        save_models: Whether to save all bootstrap models
+        
     Returns:
         bootstrap_models: List of trained models
     """
-    if device is None:
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    import matplotlib.pyplot as plt
     
-    print(f"Training {n_bootstraps} bootstrap models on {device}...")
+    # Use provided device
+    log_and_print(f"Training {n_bootstraps} bootstrap models on {device}...")
     
-    # List for trained models
+    # List for trained models and their performance metrics
     bootstrap_models = []
+    all_metrics = []
     
     for b in range(n_bootstraps):
-        print(f"\nBootstrap {b+1}/{n_bootstraps}")
+        log_and_print(f"\nBootstrap {b+1}/{n_bootstraps}")
         
-        # Create bootstrap sample with replacement
-        n_samples = len(healthy_data)
-        bootstrap_indices = resample(range(n_samples), replace=True, n_samples=n_samples)
-        bootstrap_data = healthy_data[bootstrap_indices]
-        
-        # Train-val split
-        n_val = int(0.2 * len(bootstrap_data))
-        val_indices = np.random.choice(len(bootstrap_data), n_val, replace=False)
-        train_indices = np.array([i for i in range(len(bootstrap_data)) if i not in val_indices])
-        
-        train_data = bootstrap_data[train_indices]
-        val_data = bootstrap_data[val_indices]
+        # Create bootstrap sample with replacement from training data
+        n_samples = len(train_data)
+        bootstrap_indices = np.random.choice(range(n_samples), size=n_samples, replace=True)
+        bootstrap_data = train_data[bootstrap_indices]
         
         # Create DataLoaders
-        train_loader = DataLoader(
-            TensorDataset(train_data),
+        train_loader = torch.utils.data.DataLoader(
+            torch.utils.data.TensorDataset(bootstrap_data),
             batch_size=batch_size,
             shuffle=True
         )
         
-        val_loader = DataLoader(
-            TensorDataset(val_data),
+        val_loader = torch.utils.data.DataLoader(
+            torch.utils.data.TensorDataset(valid_data),
             batch_size=batch_size,
             shuffle=False
         )
         
-        # Initialize new model
-        bootstrap_model = model_class(
-            input_dim=input_dim,
+        # Initialize a new model instance with the same configuration
+        try:
+            bootstrap_model = NormativeVAE(
+                input_dim=model.input_dim,
+                hidden_dim_1=model.hidden_dim_1 if hasattr(model, 'hidden_dim_1') else 100,
+                hidden_dim_2=model.hidden_dim_2 if hasattr(model, 'hidden_dim_2') else 100,
+                latent_dim=model.latent_dim,
+                learning_rate=model.learning_rate if hasattr(model, 'learning_rate') else 1e-4,
+                kldiv_loss_weight=model.kldiv_loss_weight,
+                dropout_prob=model.dropout_prob if hasattr(model, 'dropout_prob') else 0.1,
+                device=device
+            )
+            
+            # Train model
+            log_and_print(f"Training bootstrap model {b+1}...")
+            trained_model, history = train_normative_model(
+                model=bootstrap_model,
+                train_loader=train_loader,
+                val_loader=val_loader,
+                epochs=epochs,
+                device=device
+            )
+            
+            # Save model checkpoint if requested
+            if save_dir and save_models:
+                model_path = os.path.join(save_dir, "models", f"bootstrap_model_{b+1}.pt")
+                torch.save(trained_model.state_dict(), model_path)
+                log_and_print(f"Saved bootstrap model {b+1} to {model_path}")
+            
+            # Save training history
+            if history and isinstance(history, dict):
+                all_metrics.append({
+                    "bootstrap_id": b+1,
+                    "final_train_loss": history["train_loss"][-1] if len(history["train_loss"]) > 0 else float('nan'),
+                    "final_val_loss": history["val_loss"][-1] if len(history["val_loss"]) > 0 else float('nan'),
+                    "best_val_loss": min(history["val_loss"]) if len(history["val_loss"]) > 0 else float('nan')
+                })
+            else:
+                all_metrics.append({
+                    "bootstrap_id": b+1,
+                    "final_train_loss": float('nan'),
+                    "final_val_loss": float('nan'),
+                    "best_val_loss": float('nan')
+                })
+            
+            # Add model to the list
+            bootstrap_models.append(trained_model)
+            log_and_print(f"Successfully trained bootstrap model {b+1}")
+            
+        except Exception as e:
+            log_and_print(f"Error during training bootstrap model {b+1}: {str(e)}")
+            # Continue with the next bootstrap model
+            continue
+    
+    # Save metrics summary if we have any models
+    if save_dir and all_metrics:
+        try:
+            # Create a DataFrame from the metrics and save it
+            metrics_df = pd.DataFrame(all_metrics)
+            metrics_path = os.path.join(save_dir, "bootstrap_metrics.csv")
+            metrics_df.to_csv(metrics_path, index=False)
+            log_and_print(f"Saved bootstrap metrics to {metrics_path}")
+            
+            # Create summary figure of validation losses if we have any valid data
+            if any(not np.isnan(m["final_val_loss"]) for m in all_metrics):
+                plt.figure(figsize=(10, 6))
+                # Filter out NaN values
+                val_losses = [m["final_val_loss"] for m in all_metrics if not np.isnan(m["final_val_loss"])]
+                if val_losses:
+                    plt.boxplot(val_losses)
+                    plt.title("Distribution of Validation Losses Across Bootstrap Models")
+                    plt.ylabel("Validation Loss")
+                    fig_path = os.path.join(save_dir, "figures", "bootstrap_losses.png")
+                    plt.savefig(fig_path)
+                    log_and_print(f"Saved validation loss distribution plot to {fig_path}")
+        except Exception as e:
+            log_and_print(f"Error saving metrics or figures: {str(e)}")
+    
+    log_and_print(f"Successfully trained {len(bootstrap_models)} bootstrap models")
+    return bootstrap_models
+
+def bootstrap_train_normative_models_plots(
+    train_data, valid_data, model, n_bootstraps, epochs, batch_size, save_dir, save_models=True):
+    """
+    Train multiple bootstrap models and save detailed metrics and visualizations.
+    
+    Args:
+        train_data: Training data tensor
+        valid_data: Validation data tensor
+        model: Base model to bootstrap
+        n_bootstraps: Number of bootstrap samples
+        epochs: Number of training epochs
+        batch_size: Batch size for training
+        save_dir: Directory to save results
+        save_models: Whether to save model weights
+        
+    Returns:
+        Tuple of (List of trained models, List of metrics dictionaries)
+    """
+    n_samples = train_data.shape[0]
+    device = model.device
+    bootstrap_models = []
+    bootstrap_metrics = []
+    all_losses = []
+    
+    # Create figures directory structure
+    figures_dir = os.path.join(save_dir, "figures")
+    latent_dir = os.path.join(figures_dir, "latent_space")
+    recon_dir = os.path.join(figures_dir, "reconstructions")
+    loss_dir = os.path.join(figures_dir, "loss_curves")
+    
+    os.makedirs(latent_dir, exist_ok=True)
+    os.makedirs(recon_dir, exist_ok=True)
+    os.makedirs(loss_dir, exist_ok=True)
+    
+    log_and_print(f"Starting bootstrap training with {n_bootstraps} iterations")
+    
+    # Combine training and validation data for visualization
+    combined_data = torch.cat([train_data, valid_data], dim=0)
+    combined_labels = torch.cat([torch.zeros(train_data.shape[0]), torch.ones(valid_data.shape[0])])
+    
+    for i in range(n_bootstraps):
+        log_and_print(f"Training bootstrap model {i+1}/{n_bootstraps}")
+        
+        # Create bootstrap sample (with replacement)
+        bootstrap_indices = torch.randint(0, n_samples, (n_samples,))
+        bootstrap_train_data = train_data[bootstrap_indices]
+        
+        # Create a fresh model instance
+        bootstrap_model = NormativeVAE(
+            input_dim=model.input_dim,
+            hidden_dim_1=model.hidden_dim_1,
+            hidden_dim_2=model.hidden_dim_2,
+            latent_dim=model.latent_dim,
+            learning_rate=model.learning_rate,
+            kldiv_loss_weight=model.kldiv_loss_weight,
+            dropout_prob=model.dropout_prob,
             device=device
         )
         
-        # Train model
-        bootstrap_model, _ = train_normative_model(
+        # Train the model and collect metrics
+        trained_model, history = train_normative_model_plots(
+            train_data=bootstrap_train_data,
+            valid_data=valid_data,
             model=bootstrap_model,
-            healthy_train_loader=train_loader,
-            healthy_val_loader=val_loader,
             epochs=epochs,
-            early_stopping_patience=10
+            batch_size=batch_size,
+            save_best=True,
+            return_history=True
         )
         
-        # Save trained model
-        bootstrap_models.append(bootstrap_model)
+        # Extract metrics
+        metrics = {
+            'bootstrap_id': i,
+            'final_train_loss': history['train_loss'][-1],
+            'final_val_loss': history['val_loss'][-1],
+            'final_recon_loss': history['recon_loss'][-1],
+            'final_kl_loss': history['kl_loss'][-1],
+            'best_epoch': history['best_epoch'],
+            'best_val_loss': history['best_val_loss']
+        }
+        
+        bootstrap_models.append(trained_model)
+        bootstrap_metrics.append(metrics)
+        all_losses.append(history)
+        
+        # Save model if requested
+        if save_models:
+            model_save_path = os.path.join(save_dir, "models", f"bootstrap_model_{i}.pt")
+            torch.save(trained_model.state_dict(), model_save_path)
+            log_and_print(f"Saved model {i+1} to {model_save_path}")
+        
+        # # Generate and save visualizations (once every 5 models to avoid excessive plotting)
+        # if i % 5 == 0 or i == n_bootstraps - 1:
+        #     # Plot loss curves
+        #     plot_learning_curves(
+        #         history['train_loss'], 
+        #         history['val_loss'], 
+        #         history['kl_loss'], 
+        #         history['recon_loss'],
+        #         os.path.join(loss_dir, f"bootstrap_{i}_losses.png")
+        #     )
+            
+        #     # Get latent representations
+        #     with torch.no_grad():
+        #         trained_model.eval()
+        #         combined_data_tensor = combined_data.to(device)
+        #         features = trained_model.encoder(combined_data_tensor)
+        #         mu = trained_model.fc_mu(features)
+        #         log_var = trained_model.fc_var(features)
+        #         latent_vectors = trained_model.reparameterize(mu, log_var)
+        
+        #         # Reconstruct validation data
+        #         valid_data_tensor = valid_data.to(device)
+        #         valid_recon, _, _ = trained_model(valid_data_tensor)
+            
+        #     # # Plot latent space
+        #     # plot_latent_space(
+        #     #     latent_vectors=latent_vectors,
+        #     #     labels=combined_labels,
+        #     #     save_path=os.path.join(latent_dir, f"bootstrap_{i}_latent_tsne.png"),
+        #     #     method='tsne',
+        #     #     title=f'Bootstrap {i} (Train=0, Valid=1)'
+            # )
+            
+            # plot_latent_space(
+            #     latent_vectors=latent_vectors,
+            #     labels=combined_labels,
+            #     save_path=os.path.join(latent_dir, f"bootstrap_{i}_latent_umap.png"),
+            #     method='umap',
+            #     title=f'Bootstrap {i} (Train=0, Valid=1)'
+            # )
+            
     
-    return bootstrap_models
+    # Save all metrics to CSV
+    metrics_df = pd.DataFrame(bootstrap_metrics)
+    metrics_df.to_csv(os.path.join(save_dir, "models", "bootstrap_metrics.csv"), index=False)
+    
+    # Create combined loss plots from all bootstraps
+    plt.figure(figsize=(12, 8))
+    
+    plt.subplot(2, 2, 1)
+    for i, history in enumerate(all_losses):
+        plt.plot(history['val_loss'], alpha=0.3, color='blue')
+    plt.plot([np.mean([h['val_loss'][e] for h in all_losses]) for e in range(epochs)], 
+             linewidth=2, color='red', label='Mean Validation Loss')
+    plt.title('Validation Loss Across Bootstrap Models')
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss')
+    plt.legend()
+    plt.grid(True)
+    
+    plt.subplot(2, 2, 2)
+    for i, history in enumerate(all_losses):
+        plt.plot(history['train_loss'], alpha=0.3, color='green')
+    plt.plot([np.mean([h['train_loss'][e] for h in all_losses]) for e in range(epochs)], 
+             linewidth=2, color='red', label='Mean Training Loss')
+    plt.title('Training Loss Across Bootstrap Models')
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss')
+    plt.legend()
+    plt.grid(True)
+    
+    plt.subplot(2, 2, 3)
+    for i, history in enumerate(all_losses):
+        plt.plot(history['recon_loss'], alpha=0.3, color='purple')
+    plt.plot([np.mean([h['recon_loss'][e] for h in all_losses]) for e in range(epochs)], 
+             linewidth=2, color='red', label='Mean Reconstruction Loss')
+    plt.title('Reconstruction Loss Across Bootstrap Models')
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss')
+    plt.legend()
+    plt.grid(True)
+    
+    plt.subplot(2, 2, 4)
+    for i, history in enumerate(all_losses):
+        plt.plot(history['kl_loss'], alpha=0.3, color='orange')
+    plt.plot([np.mean([h['kl_loss'][e] for h in all_losses]) for e in range(epochs)], 
+             linewidth=2, color='red', label='Mean KL Divergence Loss')
+    plt.title('KL Divergence Loss Across Bootstrap Models')
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss')
+    plt.legend()
+    plt.grid(True)
+    
+    plt.tight_layout()
+    plt.savefig(os.path.join(figures_dir, "bootstrap_losses.png"))
+    plt.close()
+    
+    # Plot distribution of metrics
+    plot_bootstrap_metrics(bootstrap_metrics, os.path.join(figures_dir, "bootstrap_metrics_distribution.png"))
+    
+    return bootstrap_models, bootstrap_metrics
 
+def train_normative_model(model, train_loader, val_loader, epochs=20, device=None, early_stopping_patience=10):
+    """
+    Train a normative VAE model
+    
+    Args:
+        model: NormativeVAE model instance
+        train_loader: DataLoader for training data
+        val_loader: DataLoader for validation data
+        epochs: Number of training epochs
+        device: Device to use (cuda/cpu)
+        early_stopping_patience: Number of epochs to wait for improvement before stopping
+        
+    Returns:
+        model: Trained model
+        history: Dictionary containing training history
+    """
+    # Ensure we have default return values
+    history = {
+        "train_loss": [],
+        "val_loss": [],
+        "recon_loss": [],
+        "kl_loss": []
+    }
+    """
+    Train a normative VAE model
+    
+    Args:
+        model: NormativeVAE model instance
+        train_loader: DataLoader for training data
+        val_loader: DataLoader for validation data
+        epochs: Number of training epochs
+        device: Device to use (cuda/cpu)
+        early_stopping_patience: Number of epochs to wait for improvement before stopping
+        
+    Returns:
+        model: Trained model
+        history: Dictionary containing training history
+    """
+    if device is None:
+        device = model.device
+    
+    model = model.to(device)
+    model.train()
+    
+    # Initialize history dictionary to track metrics
+    history = {
+        "train_loss": [],
+        "val_loss": [],
+        "recon_loss": [],
+        "kl_loss": []
+    }
+    
+    # Early stopping variables
+    best_val_loss = float('inf')
+    patience_counter = 0
+    best_model_state = None
+    
+    # Training loop
+    log_and_print(f"Starting training for {epochs} epochs")
+    
+    for epoch in range(epochs):
+        # Training phase
+        model.train()
+        train_losses = []
+        recon_losses = []
+        kl_losses = []
+        
+        for batch_idx, (data,) in enumerate(train_loader):
+            data = data.to(device).float()
+            
+            # Forward pass
+            model.optimizer.zero_grad()
+            recon_batch, mu, logvar = model(data)
+            
+            # Calculate loss
+            loss, recon_loss, kl_loss = model.loss_function(recon_batch, data, mu, logvar)
+            
+            # Backward pass and optimize
+            loss.backward()
+            model.optimizer.step()
+            
+            # Track losses
+            train_losses.append(loss.item())
+            recon_losses.append(recon_loss.item())
+            kl_losses.append(kl_loss.item())
+        
+        # Calculate average training metrics for this epoch
+        avg_train_loss = np.mean(train_losses)
+        avg_recon_loss = np.mean(recon_losses)
+        avg_kl_loss = np.mean(kl_losses)
+        
+        # Validation phase
+        model.eval()
+        val_losses = []
+        
+        with torch.no_grad():
+            for batch_idx, (data,) in enumerate(val_loader):
+                data = data.to(device).float()
+                
+                # Forward pass
+                recon_batch, mu, logvar = model(data)
+                
+                # Calculate loss
+                loss, _, _ = model.loss_function(recon_batch, data, mu, logvar)
+                
+                # Track validation loss
+                val_losses.append(loss.item())
+        
+        # Calculate average validation loss
+        avg_val_loss = np.mean(val_losses)
+        
+        # Update learning rate scheduler if applicable
+        if hasattr(model, 'update_learning_rate'):
+            model.update_learning_rate(avg_val_loss)
+        
+        # Update history
+        history["train_loss"].append(avg_train_loss)
+        history["val_loss"].append(avg_val_loss)
+        history["recon_loss"].append(avg_recon_loss)
+        history["kl_loss"].append(avg_kl_loss)
+        
+        # Log progress
+        if (epoch + 1) % 5 == 0 or epoch == 0 or epoch == epochs - 1:
+            log_and_print(f"Epoch {epoch+1}/{epochs} - "
+                         f"Train Loss: {avg_train_loss:.4f}, "
+                         f"Val Loss: {avg_val_loss:.4f}, "
+                         f"Recon Loss: {avg_recon_loss:.4f}, "
+                         f"KL Loss: {avg_kl_loss:.4f}")
+        
+        # Early stopping check
+        if avg_val_loss < best_val_loss:
+            best_val_loss = avg_val_loss
+            patience_counter = 0
+            # Save best model state
+            best_model_state = {key: value.cpu().clone() for key, value in model.state_dict().items()}
+        else:
+            patience_counter += 1
+            if patience_counter >= early_stopping_patience:
+                log_and_print(f"Early stopping triggered after {epoch+1} epochs")
+                break
+    
+    # Load best model if early stopping was triggered
+    if best_model_state is not None and patience_counter >= early_stopping_patience:
+        model.load_state_dict(best_model_state)
+        log_and_print("Loaded best model based on validation loss")
+    
+    return model, history
+
+def train_normative_model_plots(train_data, valid_data, model, epochs, batch_size, save_best=True, return_history=True):
+    """
+    Train a single normative model with detailed tracking of metrics.
+    
+    Args:
+        train_data: Training data tensor
+        valid_data: Validation data tensor
+        model: Model to train
+        epochs: Number of training epochs
+        batch_size: Batch size for training
+        save_best: Whether to save best model based on validation loss
+        return_history: Whether to return training history
+        
+    Returns:
+        Trained model and history dictionary if return_history=True
+    """
+    device = model.device
+    optimizer = torch.optim.Adam(model.parameters(), lr=model.learning_rate)
+    
+    # Initialize history dictionary
+    history = {
+        'train_loss': [],
+        'val_loss': [],
+        'recon_loss': [],
+        'kl_loss': [],
+        'best_epoch': 0,
+        'best_val_loss': float('inf')
+    }
+    
+    # Create data loaders
+    train_dataset = torch.utils.data.TensorDataset(train_data)
+    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+    
+    valid_dataset = torch.utils.data.TensorDataset(valid_data)
+    valid_loader = torch.utils.data.DataLoader(valid_dataset, batch_size=batch_size, shuffle=False)
+    
+    best_model_state = None
+    
+    for epoch in range(epochs):
+        model.train()
+        train_loss = 0.0
+        train_recon_loss = 0.0
+        train_kl_loss = 0.0
+        
+        for batch_idx, (data,) in enumerate(train_loader):
+            data = data.to(device)
+            optimizer.zero_grad()
+            
+            recon_batch, mu, log_var = model(data)
+            loss, recon_loss, kl_loss = model.loss_function(recon_batch, data, mu, log_var)
+            
+            loss.backward()
+            optimizer.step()
+            
+            train_loss += loss.item()
+            train_recon_loss += recon_loss.item()
+            train_kl_loss += kl_loss.item()
+        
+        # Validation step
+        model.eval()
+        val_loss = 0.0
+        val_recon_loss = 0.0
+        val_kl_loss = 0.0
+        
+        with torch.no_grad():
+            for batch_idx, (data,) in enumerate(valid_loader):
+                data = data.to(device)
+                recon_batch, mu, log_var = model(data)
+                loss, recon_loss, kl_loss = model.loss_function(recon_batch, data, mu, log_var)
+                
+                val_loss += loss.item()
+                val_recon_loss += recon_loss.item()
+                val_kl_loss += kl_loss.item()
+        
+        # Normalize by batch count
+        train_loss /= len(train_loader)
+        train_recon_loss /= len(train_loader)
+        train_kl_loss /= len(train_loader)
+        
+        val_loss /= len(valid_loader)
+        val_recon_loss /= len(valid_loader)
+        val_kl_loss /= len(valid_loader)
+        
+        # Save metrics
+        history['train_loss'].append(train_loss)
+        history['val_loss'].append(val_loss)
+        history['recon_loss'].append(train_recon_loss)
+        history['kl_loss'].append(train_kl_loss)
+        
+        # Save best model based on validation loss
+        if val_loss < history['best_val_loss']:
+            history['best_val_loss'] = val_loss
+            history['best_epoch'] = epoch
+            if save_best:
+                best_model_state = model.state_dict().copy()
+        
+        if (epoch + 1) % 5 == 0 or epoch == 0 or epoch == epochs-1:
+            log_and_print(f"Epoch {epoch+1}/{epochs}, Train Loss: {train_loss:.4f}, "
+                         f"Val Loss: {val_loss:.4f}, Recon: {train_recon_loss:.4f}, KL: {train_kl_loss:.4f}")
+    
+    # Load best model if available
+    if save_best and best_model_state is not None:
+        model.load_state_dict(best_model_state)
+    
+    if return_history:
+        return model, history
+    return model
 
 # Compute deviation scores with bootstrap models
 def compute_deviation_scores(bootstrap_models, data, batch_size=32):
@@ -638,7 +1240,7 @@ def run_normative_modeling_pipeline(healthy_data, patient_data, contrastvae=None
         n_bootstraps=n_bootstraps,
         epochs=train_epochs,
         batch_size=batch_size,
-        device=device
+        #device=device
     )
     
     # Save models
