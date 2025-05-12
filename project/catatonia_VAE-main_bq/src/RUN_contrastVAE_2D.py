@@ -69,7 +69,7 @@ def main(atlas_name: str, num_epochs: int, batch_size: int, learning_rate: float
         ATLAS_NAME=atlas_name,
         PROC_DATA_PATH="/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data_training/proc_extracted_xml_data",
         OUTPUT_DIR=save_dir,
-        # load_mri_data parameters
+        # load_mri_data 
         VOLUME_TYPE= "Vgm",
         VALID_VOLUME_TYPES=["Vgm", "Vwm", "csf"],
         # Loading Model

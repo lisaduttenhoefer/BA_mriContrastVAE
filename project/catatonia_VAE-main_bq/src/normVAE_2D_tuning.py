@@ -29,6 +29,7 @@ from module.data_processing_hc import (
     load_mri_data_2D_all_atlases, 
     process_subjects,
     train_val_split_annotations,
+    train_val_split_subjects,
     )
 from utils.logging_utils import (
     log_and_print,
@@ -63,6 +64,10 @@ def tune_ContrastVAE(
     weight_decay = config["weight_decay"]
     contr_loss_weight = config["contr_loss_weight"]
     recon_loss_weight = config["recon_loss_weight"]
+    # Set default output directory and other parameters
+    output_dir = config.get('output_dir', None)
+    atlas_name = config.get('atlas_name', 'all')
+    num_epochs = config.get('num_epochs', 50)
 
     # setup paths to be absolute paths
     base_dir = os.path.dirname(__file__)  # Directory where the script is located
@@ -75,7 +80,7 @@ def tune_ContrastVAE(
     # Create output directory
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     if output_dir is None:
-        save_dir = f"/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/normative_results_{timestamp}"
+        save_dir = f"/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/analysis/tuning_results/tuning_results_{timestamp}"
     else:
         save_dir = output_dir
 
@@ -310,15 +315,14 @@ def tune_ContrastVAE(
         # })
 
     # Final average accuracy across all folds
-    k_avg_accuracy = accuracy_sum / k_fold
+    #k_avg_accuracy = accuracy_sum / k_fold
     
     # Final report with the complete k-fold cross-validation result
     tune.report({
-        "k_avg_accuracy": k_avg_accuracy,
-        # "completed_folds": k_fold
+        "accuracy": best_model_accuracy,
     })
-    # return k_avg_accuracy
-    print(f"Average accuracy over all folds: {k_avg_accuracy}")
+
+    print(f"Model accuracy: {best_model_accuracy}")
     
 
 
@@ -328,7 +332,7 @@ if __name__ == "__main__":
     path_all = "/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/metadata_20250110/full_data_train_valid_test.csv"
     all_annotations = pd.read_csv(path_all, header=[0])
 
-    k_fold = 5
+    #k_fold = 5
 
     # train_indices, valid_indices = cross_validation_split(path_original=path_all,
     #                                                       path_to_dir="./data/relevant_metadata",
@@ -365,7 +369,7 @@ if __name__ == "__main__":
         tune_config=tune.TuneConfig(
                 time_budget_s=18000,
                 num_samples=-1,
-                metric="k_avg_accuracy",
+                metric="accuracy",
                 mode="max",
                 max_concurrent_trials=1
             ),
@@ -373,7 +377,7 @@ if __name__ == "__main__":
             name=atlas_name,
             storage_path=local_dir,
             log_to_file=True,
-            stop={"k_avg_accuracy":0.90},
+            stop={"accuracy":0.90},
             ),
         param_space=search_space
     )
@@ -391,9 +395,11 @@ if __name__ == "__main__":
     # print best hyperparameters
     time.sleep(10)
 
-    best_result = analysis.get_best_result(metric="k_avg_accuracy", mode="max")
+    best_result = analysis.get_best_result(metric="accuracy", mode="max")
     print(f"Best hyperparameters for atlas {atlas_name} found were: ", best_result )
     # print("Best accuracy for atlas {atlas_name} was: ", best_result.checkpoint)
+    print(f"Best hyperparameters found were: {best_result.config}")
+    print(f"Best accuracy was: {best_result.metrics['accuracy']}")
     print()
     print()
 

@@ -457,17 +457,24 @@ def train_ContrastVAE_2D(
         
         # Update metrics
         model_metrics = update_performance_metrics(model_metrics, [train_metrics, valid_metrics])
-        
-        # Handle checkpoint operations
          
-        #  # report accuracy to Ray Tune for hyperparameter tuning
-        # if accuracy_tune:
-        #     train.report({"accuracy": model_metrics["accuracy"].max()})
-
-        # # If we're going to stop training early, we need to do a checkpoint
-        # if config.EARLY_STOPPING:
-        #     if model_metrics["learning_rate"].iloc[-1] <= config.STOP_LEARNING_RATE:
-        #         is_checkpoint = True
+        if accuracy_tune:
+            try:
+                tune.report(
+                    train_loss=train_loss,
+                    t_contr_loss=t_contr_loss,
+                    t_recon_loss=t_recon_loss,  # Dies ist die fehlende Metrik
+                    t_kldiv_loss=t_kldiv_loss,
+                    valid_loss=valid_loss,
+                    v_contr_loss=v_contr_loss,
+                    v_recon_loss=v_recon_loss,
+                    v_kldiv_loss=v_kldiv_loss,
+                    accuracy=accuracy,
+                    learning_rate=optimizer.param_groups[0]["lr"]
+                )
+            except:
+        # Falls nicht im Tune-Kontext ausgeführt, ist ein Fehlschlag ok
+                pass
 
         if is_checkpoint:
 

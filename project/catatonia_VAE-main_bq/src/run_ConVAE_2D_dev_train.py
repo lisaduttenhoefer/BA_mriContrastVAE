@@ -329,57 +329,6 @@ def main(atlas_name: str, num_epochs: int, n_bootstraps: int, batch_size: int, l
     # Save baseline model
     torch.save(baseline_model.state_dict(), f"{save_dir}/models/baseline_model.pt")
     
-    # # Plot baseline model learning curves
-    # plot_learning_curves(
-    #     baseline_history['train_loss'],
-    #     baseline_history['val_loss'],
-    #     baseline_history['kl_loss'],
-    #     baseline_history['recon_loss'],
-    #     os.path.join(save_dir, "figures", "baseline_learning_curves.png")
-    # )
-    
-    # # Generate latent space visualization for baseline model
-    # baseline_model.eval()
-    # with torch.no_grad():
-    #     # Combine training and validation data
-    #     combined_data = torch.cat([train_data, valid_data], dim=0)
-    #     combined_labels = torch.cat([torch.zeros(train_data.shape[0]), torch.ones(valid_data.shape[0])])
-        
-    #     # Get latent representations
-    #     combined_data_tensor = combined_data.to(device)
-    #     features = baseline_model.encoder(combined_data_tensor)
-    #     mu = baseline_model.fc_mu(features)
-    #     log_var = baseline_model.fc_var(features)
-    #     latent_vectors = baseline_model.reparameterize(mu, log_var)
-        
-    #     # Get reconstructions
-    #     valid_data_tensor = valid_data.to(device)
-    #     valid_recon, _, _ = baseline_model(valid_data_tensor)
-    
-    # # Plot baseline latent space
-    # plot_latent_space(
-    #     latent_vectors=latent_vectors,
-    #     labels=combined_labels,
-    #     save_path=os.path.join(save_dir, "figures", "baseline_latent_tsne.png"),
-    #     method='tsne',
-    #     title='Baseline Model (Train=0, Valid=1)'
-    # )
-    
-    # plot_latent_space(
-    #     latent_vectors=latent_vectors,
-    #     labels=combined_labels,
-    #     save_path=os.path.join(save_dir, "figures", "baseline_latent_umap.png"),
-    #     method='umap',
-    #     title='Baseline Model (Train=0, Valid=1)'
-    # )
-    
-    # # Plot baseline reconstructions
-    # plot_reconstruction_samples(
-    #     original=valid_data_tensor[:5],
-    #     reconstructed=valid_recon[:5],
-    #     save_path=os.path.join(save_dir, "figures", "baseline_reconstructions.png")
-    # )
-    
     # Train bootstrap models
     log_and_print("Training bootstrap models...")
     bootstrap_models, bootstrap_metrics = bootstrap_train_normative_models_plots(
@@ -410,35 +359,7 @@ def main(atlas_name: str, num_epochs: int, n_bootstraps: int, batch_size: int, l
         ('final_kl_loss', 'KL Divergence Loss')
     ]
     
-    # for i, (metric, title) in enumerate(metrics_to_plot):
-    #     plt.subplot(2, 2, i+1)
-    #     sns.boxplot(y=metrics_df[metric])
-    #     plt.title(f'Distribution of {title}')
-    #     plt.grid(True)
-        
-    #     # Add summary statistics as text
-    #     mean_val = metrics_df[metric].mean()
-    #     std_val = metrics_df[metric].std()
-    #     min_val = metrics_df[metric].min()
-    #     max_val = metrics_df[metric].max()
-        
-    #     stats_text = f"Mean: {mean_val:.4f}\nStd: {std_val:.4f}\nMin: {min_val:.4f}\nMax: {max_val:.4f}"
-    #     plt.text(0.05, 0.95, stats_text, transform=plt.gca().transAxes, 
-    #             verticalalignment='top', bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
-    
-    # plt.tight_layout()
-    # plt.savefig(os.path.join(save_dir, "figures", "bootstrap_performance_summary.png"))
-    # plt.close()
-    
-    # # Create correlation matrix of metrics
-    # plt.figure(figsize=(10, 8))
-    # corr_matrix = metrics_df[['final_train_loss', 'final_val_loss', 'final_recon_loss', 'final_kl_loss', 'best_epoch']].corr()
-    # sns.heatmap(corr_matrix, annot=True, cmap='coolwarm', vmin=-1, vmax=1)
-    # plt.title('Correlation Matrix of Model Metrics')
-    # plt.tight_layout()
-    # plt.savefig(os.path.join(save_dir, "figures", "metrics_correlation.png"))
-    # plt.close()
-    
+
     # Save training metadata
     training_metadata = {
         "atlas_name": atlas_name,

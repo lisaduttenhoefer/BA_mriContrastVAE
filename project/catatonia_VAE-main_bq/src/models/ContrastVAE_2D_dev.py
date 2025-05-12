@@ -22,7 +22,7 @@ from utils.logging_utils import (
     log_and_print,
     log_data_loading,
     log_model_ready,
-    log_model_setup,
+    log_model_setup, 
     setup_logging,
     log_atlas_mode
 )
