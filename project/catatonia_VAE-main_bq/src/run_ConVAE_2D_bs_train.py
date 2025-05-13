@@ -66,7 +66,7 @@ matplotlib.use("Agg")
 def create_arg_parser():
     parser = argparse.ArgumentParser(description='Arguments for Normative Modeling Training')
     parser.add_argument('--atlas_name', help='Name of the desired atlas for training.')
-    parser.add_argument('--num_epochs', help='Number of epochs to be trained for', type=int, default=20)
+    parser.add_argument('--num_epochs', help='Number of epochs to be trained for', type=int, default=100)
     parser.add_argument('--n_bootstraps', help='Number of bootstrap samples', type=int, default=50)
     parser.add_argument('--batch_size', help='Batch size', type=int, default=32)
     parser.add_argument('--learning_rate', help='Learning rate', type=float, default=4e-5)

@@ -304,7 +304,7 @@ if __name__ == "__main__":
             name=atlas_name,
             storage_path=local_dir,
             log_to_file=True,
-            stop={"t_recon_loss":0.2},
+            stop={"t_recon_loss":0.02},
             ),
         param_space=search_space
     )
