@@ -1,5 +1,6 @@
 import logging
 import os
+import sys
 from datetime import datetime, timedelta
 from typing import Dict
 
@@ -13,6 +14,25 @@ def log_and_print(message: str):
     logging.info(message)
     print(message)
 
+def log_and_print_test(message, logger=None, level=logging.INFO):
+    """
+    Log a message and print it to console.
+    
+    Args:
+        message: Message to log and print
+        logger: Logger instance (if None, will only print)
+        level: Logging level (default: INFO)
+    """
+    print("----------[INFO]",message)
+    if logger:
+        if level == logging.INFO:
+            logger.info(message)
+        elif level == logging.WARNING:
+            logger.warning(message)
+        elif level == logging.ERROR:
+            logger.error(message)
+        elif level == logging.DEBUG:
+            logger.debug(message)
 
 def setup_logging(config: Config_2D):
     """
@@ -55,7 +75,39 @@ def setup_logging(config: Config_2D):
     print(f"More details in log file: {filename}")
     print("")
     print("#" * 100)
-    print("")
+    
+def setup_logging_test(log_file=None, log_level=logging.INFO):
+    """
+    Set up logging configuration.
+    
+    Args:
+        log_file: Path to the log file. If None, logs only to console.
+        log_level: Logging level (default: INFO)
+    
+    Returns:
+        Logger instance
+    """
+    # Create logger
+    logger = logging.getLogger("normative_vae")
+    logger.setLevel(log_level)
+    logger.handlers = []  # Clear any existing handlers
+    
+    # Create formatter
+    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+    
+    # Create console handler
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setFormatter(formatter)
+    logger.addHandler(console_handler)
+    
+    # Create file handler if log_file is provided
+    if log_file:
+        file_handler = logging.FileHandler(log_file)
+        file_handler.setFormatter(formatter)
+        logger.addHandler(file_handler)
+    
+    return logger
+
 
 def log_atlas_mode(atlas_name: str, num_rois: int):
     log_and_print(f"Using atlas: {atlas_name}\n"

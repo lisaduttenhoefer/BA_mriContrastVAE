@@ -29,27 +29,46 @@ from module.data_processing_hc import (
     process_subjects,
 )
 from utils.logging_utils import setup_logging_test, log_and_print_test
-from utils.dev_scores_utils import calculate_deviations, plot_deviation_distributions, analyze_score_auc, visualize_embeddings, calculate_cliffs_delta #,find_top_deviant_regions,
+from utils.dev_scores_utils import (
+    calculate_deviations, 
+    plot_deviation_distributions, 
+    analyze_score_auc, 
+    visualize_embeddings, 
+    calculate_cliffs_delta, 
+    calculate_roi_deviation_scores, 
+    plot_diagnosis_deviation_boxplots, 
+    calculate_roi_contribution,
+)
 
 #--------------------------------------- NECESSARY ARGUMENTS -----------------------------------------------------
 model_dir = "/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/normative_results_20250513_140323" #dir of trained models
 clinical_data_path = "/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data/test_xml_data" #dir to clinical data
 clinical_csv = "/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data_training/testing_metadata.csv" #path to clinical csv with annotations
 #-----------------------------------------------------------------------------------------------------------------
+
 def extract_measurements(subjects):
     """Extract measurements from subjects as torch tensors."""
     all_measurements = []
+    all_roi_names = []
+    
     for subject in subjects:
         all_measurements.append(torch.tensor(subject["measurements"]).squeeze())
-    return torch.stack(all_measurements)
-
-
+        
+        # Extract ROI names if present, otherwise use indices
+        if "roi_names" in subject and subject["roi_names"] is not None:
+            all_roi_names = subject["roi_names"]
+    
+    # Create a mapping of indices to ROI names if available
+    if not all_roi_names:
+        all_roi_names = [f"region_{i}" for i in range(all_measurements[0].shape[0])]
+    
+    return torch.stack(all_measurements), all_roi_names
 
 def main(args):
     # ---------------------- INITIAL SETUP (output dirs, device, seed) --------------------------------------------
     # Create output directory
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    save_dir = f"{args.output_dir}/clinical_deviations_{timestamp}" if args.output_dir else f"/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/analysis/clinical_deviations_{timestamp}"
+    save_dir = f"{args.output_dir}/clinical_deviations_{timestamp}" if args.output_dir else f"./clinical_deviations_{timestamp}"
     os.makedirs(save_dir, exist_ok=True)
     os.makedirs(f"{save_dir}/figures", exist_ok=True)
     
@@ -126,9 +145,10 @@ def main(args):
             valid_volume_types=valid_volume_types,
         )
     
-    # Extract measurements
-    clinical_data = extract_measurements(subjects_clinical)
+    # Extract measurements AND ROI names
+    clinical_data, roi_names = extract_measurements(subjects_clinical)
     log_and_print_test(f"Clinical data shape: {clinical_data.shape}")
+    log_and_print_test(f"Number of ROIs: {len(roi_names)}")
     
     # Get input dimension
     input_dim = clinical_data.shape[1]
@@ -137,6 +157,11 @@ def main(args):
     # Count subjects by diagnosis
     diagnosis_counts = annotations_clinical["Diagnosis"].value_counts()
     log_and_print_test(f"Subject counts by diagnosis:\n{diagnosis_counts}")
+    
+    # Save ROI names for reference
+    roi_df = pd.DataFrame({'ROI_Index': range(len(roi_names)), 'ROI_Name': roi_names})
+    roi_df.to_csv(f"{save_dir}/roi_names.csv", index=False)
+    log_and_print_test(f"Saved ROI names to {save_dir}/roi_names.csv")
     
     # ---------------------- LOAD BOOTSTRAP MODELS (increases robustness)  --------------------------------------------
     log_and_print_test("Loading normative bootstrap models...")
@@ -176,34 +201,35 @@ def main(args):
     
     log_and_print_test(f"Successfully loaded {len(bootstrap_models)} models")
     
-    # ------------------------------- CALCULATION DEV_SCORES  --------------------------------------------
-    log_and_print_test("----------[INFO] Calculating deviation scores...")
-    results_df = calculate_deviations(
+    # ------------------------------- CALCULATION DEV_SCORES WITH ROI TRACKING --------------------------------------------
+    log_and_print_test("Calculating deviation scores with ROI tracking...")
+    
+    # Use our modified function that maintains ROI names
+    results_df = calculate_roi_deviation_scores(
         normative_models=bootstrap_models,
         data_tensor=clinical_data,
         annotations_df=annotations_clinical,
-        device=device
+        device=device,
+        roi_names=roi_names
     )
     
     # Save deviation scores
     results_df.to_csv(f"{save_dir}/deviation_scores.csv", index=False)
     log_and_print_test(f"Saved deviation scores to {save_dir}/deviation_scores.csv")
     
-    # Generate visualizations
+    # Generate visualizations like in the screenshot
     log_and_print_test("Generating visualizations...")
     
-    # Plot deviation distributions
-    plot_deviation_distributions(results_df, save_dir)
-    log_and_print_test("Plotted deviation distributions")
+    # Plot deviation distributions for overall metrics
+    for metric in ["deviation_score", "reconstruction_error", "kl_divergence"]:
+        plot_diagnosis_deviation_boxplots(results_df, metric, save_dir)
     
-    # # Analyze ROC curves
-    # auc_df = analyze_score_auc(results_df, save_dir)
-    # log_and_print_test(f"ROC analysis complete. AUC summary:\n{auc_df.pivot(index='Diagnosis', columns='Metric', values='AUC')}")
-    
-    # # Find top deviant regions
-    # deviation_results = find_top_deviant_regions(results_df, save_dir)
-    # log_and_print_test("Analyzed regional deviations")
-    
+    # Calculate ROI contributions and create visualizations
+    log_and_print_test("Calculating ROI contributions to overall deviation...")
+    roi_stats = calculate_roi_contribution(results_df, save_dir, roi_names)
+    log_and_print_test(f"ROI contribution analysis complete. Results saved to {save_dir}/roi_contribution.csv")
+
+
     # Visualize embeddings in latent space
     log_and_print_test("Visualizing latent space embeddings...")
     embedding_fig, embedding_df = visualize_embeddings(
@@ -216,86 +242,27 @@ def main(args):
     embedding_df.to_csv(f"{save_dir}/latent_embeddings.csv", index=False)
     log_and_print_test("Saved latent space visualizations")
     
-    # Run statistical tests between groups
-    log_and_print_test("Running statistical tests between groups...")
-    
-    # Prepare for statistical testing
-    diagnoses = ["HC", "SCHZ", "CTT", "MDD"]
-    metrics = ["reconstruction_error", "kl_divergence", "deviation_score"]
-    
-    # Run t-tests for each patient group against HC
-    stats_results = []
-    
-    for diagnosis in ["SCHZ", "CTT", "MDD"]:
-        for metric in metrics:
-
-            dx_values = results_df[results_df["Diagnosis"] == diagnosis][metric].values
-
-            if len(dx_values) > 0:  # Only if we have data for this diagnosis
-                for roi in [col for col in results_df.columns if col.startswith("region_")]:
-                    roi_values = results_df[results_df["Diagnosis"] == diagnosis][roi].values
-                    
-                    if len(roi_values) > 0:  # Sicherstellen, dass ROI-Daten vorhanden sind
-                        # Berechnung von Cliff's Delta für ROI vs. Gesamtdeviation
-                        cliff_delta = calculate_cliffs_delta(roi_values, dx_values)
-                        
-                        if cliff_delta is not None:  # Falls gültig, weiter berechnen
-                            # Berechnung von Cohen's d für ROI vs. Gesamtdeviation
-                            pooled_std = np.sqrt(((len(roi_values) - 1) * np.var(roi_values) + 
-                                                (len(dx_values) - 1) * np.var(dx_values)) / 
-                                                (len(roi_values) + len(dx_values) - 2))
-                            effect_size = np.abs(np.mean(roi_values) - np.mean(dx_values)) / pooled_std
-                            
-                            stats_results.append({
-                                "Diagnosis": diagnosis,
-                                "Metric": metric,
-                                "ROI": roi,
-                                "Cliff's Delta": cliff_delta,
-                                "Cohen's d": effect_size,
-                                "Patient_Mean": np.mean(dx_values),
-                                "Patient_Std": np.std(dx_values),
-                            })
+    # Create summary for top ROIs by diagnosis
+    log_and_print_test("Creating ROI contribution summary by diagnosis...")
+    for diagnosis in roi_stats['Diagnosis'].unique():
+        if diagnosis == 'HC':  # Skip reference group
+            continue
             
-        # Speichern der statistischen Ergebnisse
-    stats_df = pd.DataFrame(stats_results)
-    stats_df.to_csv(f"{save_dir}/statistical_tests.csv", index=False)
-    log_and_print_test(f"Statistical analysis complete. Results saved to {save_dir}/statistical_tests.csv")
-
-    # Erstellen der Zusammenfassungstabelle
-    summary_table = stats_df.pivot_table(
-        index="Diagnosis", 
-        columns="Metric", 
-        values=["Cliff's Delta", "Patient_Mean", "Patient_Std"],
-        aggfunc="first"
-    )
-
-    log_and_print_test("Analysis summary by diagnosis:")
-    log_and_print_test("\nCliff's delta values:")
-    log_and_print_test(summary_table["Cliff's Delta"])
-    log_and_print_test("\nPatient mean values:")
-    log_and_print_test(summary_table["Patient_Mean"])
-    log_and_print_test("\nPatient standard deviations:")
-    log_and_print_test(summary_table["Patient_Std"])
-
-    # plt.figure(figsize=(10, 6))
-    # cliff_delta_df = stats_df.pivot(index="Diagnosis", columns="Metric", values="Cliff's Delta")
-    # cliff_delta_df.plot(kind="bar", rot=0)
-    # plt.title("Cliff's Delta by Diagnosis and Metric", fontsize=16)
-    # plt.ylabel("Cliff's Delta", fontsize=14)
-    # plt.grid(axis="y", linestyle="--", alpha=0.7)
-    # plt.tight_layout()
-    # plt.savefig(f"{save_dir}/figures/cliffs_delta.png", dpi=300)
-    # plt.close()
-
-
+        # Get top contributing ROIs for this diagnosis
+        diag_rois = roi_stats[roi_stats['Diagnosis'] == diagnosis].sort_values('Cliff_Delta', ascending=False)
+        
+        # Take top 20 ROIs if available
+        top_n = min(20, len(diag_rois))
+        top_rois = diag_rois.head(top_n)
+        
+        log_and_print_test(f"\nTop {top_n} contributing ROIs for {diagnosis}:")
+        log_and_print_test(top_rois[['ROI', 'Cliff_Delta', 'ROI_Mean', 'Overall_Mean']])
+    
     log_and_print_test(f"Deviation analysis complete! Results saved to {save_dir}")
     return save_dir 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Calculate deviation scores for clinical groups.")
-    # parser.add_argument("--model_dir", required=True, help="Directory containing trained normative models")
-    # parser.add_argument("--clinical_data_path", required=True, help="Path to clinical data")
-    # parser.add_argument("--clinical_csv", required=True, help="Path to clinical CSV file")
     parser.add_argument("--atlas_name", default=None, help="Atlas name (if not available in config)")
     parser.add_argument("--latent_dim", type=int, default=20, help="Latent dimension (if not available in config)")
     parser.add_argument("--max_models", type=int, default=0, help="Maximum number of models to use (0 = all)")
