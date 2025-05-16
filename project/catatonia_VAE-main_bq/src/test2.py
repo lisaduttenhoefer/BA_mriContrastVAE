@@ -32,7 +32,7 @@ from utils.logging_utils import setup_logging_test, log_and_print_test
 from utils.dev_scores_utils import calculate_deviations, plot_deviation_distributions, analyze_score_auc, visualize_embeddings, calculate_cliffs_delta #,find_top_deviant_regions,
 
 #--------------------------------------- NECESSARY ARGUMENTS -----------------------------------------------------
-model_dir = "/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/normative_results_20250513_140323" #dir of trained models
+model_dir = "/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/normative_results_20250515_101655" #dir of trained models
 clinical_data_path = "/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data/test_xml_data" #dir to clinical data
 clinical_csv = "/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data_training/testing_metadata.csv" #path to clinical csv with annotations
 #-----------------------------------------------------------------------------------------------------------------
@@ -152,7 +152,6 @@ def main(args):
             raise FileNotFoundError("No models found in the specified directory.")
     
     # Load up to max_models if specified
-    if args.max_models > 0:
         model_files = model_files[:args.max_models]
     
     for model_file in model_files:

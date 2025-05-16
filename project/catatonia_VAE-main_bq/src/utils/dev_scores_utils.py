@@ -5,7 +5,6 @@ import sys
 from pathlib import Path
 import logging
 from datetime import datetime
-
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt

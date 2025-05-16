@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 import argparse
 import datetime as dt
-
+from ray.tune.schedulers import ASHAScheduler
 sys.path.append("../src")
 import os
 import sys
@@ -290,24 +290,44 @@ if __name__ == "__main__":
 
     tuner = tune.Tuner(
         tune.with_resources(
-            tune_ContrastVAE,
-            resources={"cpu": 10, "gpu": 2}
-            ),
+            tune_ContrastVAE, resources={"cpu": 10, "gpu": 2}
+        ),
         tune_config=tune.TuneConfig(
-                time_budget_s=3600,
-                num_samples=-1,
-                metric="t_recon_loss",
-                mode="min",
-                max_concurrent_trials=1
-            ),
+            time_budget_s=3600,
+            num_samples=100,  # Increased search count
+            metric="t_recon_loss",
+            mode="min",
+            scheduler=ASHAScheduler(grace_period=5, reduction_factor=2),  # Prunes bad trials
+        ),
         run_config=tune.RunConfig(
             name=atlas_name,
             storage_path=local_dir,
             log_to_file=True,
-            stop={"t_recon_loss":0.02},
-            ),
+            stop={"t_recon_loss": 0.02},
+        ),
         param_space=search_space
     )
+
+    # tuner = tune.Tuner(
+    #     tune.with_resources(
+    #         tune_ContrastVAE,
+    #         resources={"cpu": 10, "gpu": 2}
+    #         ),
+    #     tune_config=tune.TuneConfig(
+    #             time_budget_s=3600,
+    #             num_samples=-1,
+    #             metric="t_recon_loss",
+    #             mode="min",
+    #             max_concurrent_trials=1
+    #         ),
+    #     run_config=tune.RunConfig(
+    #         name=atlas_name,
+    #         storage_path=local_dir,
+    #         log_to_file=True,
+    #         stop={"t_recon_loss":0.02},
+    #         ),
+    #     param_space=search_space
+    # )
         
     analysis = tuner.fit()
 
