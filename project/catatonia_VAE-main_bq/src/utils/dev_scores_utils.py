@@ -1,6 +1,7 @@
 
 import argparse
 import os
+import h5py
 import sys
 from pathlib import Path
 import logging
@@ -234,123 +235,8 @@ def plot_deviation_distributions(results_df, save_dir):
         plt.close()
     return
 
-def analyze_score_auc(results_df, save_dir):
-    """Berechnet AUC-Werte basierend auf Scores für HC vs. nicht-HC Patienten."""
-    os.makedirs(f"{save_dir}/figures/roc", exist_ok=True)
-    
-    # Definiere die Metriken, die als Scores genutzt werden
-    metrics = ["reconstruction_error", "kl_divergence", "deviation_score"]
-    
-    # Erstelle binäre Labels: HC = 0, Nicht-HC = 1
-    results_df["target"] = (results_df["Diagnosis"] != "HC").astype(int)
-    
-    # Speichert AUC-Werte für jede Metrik
-    auc_results = []
-    
-    plt.figure(figsize=(12, 6))
-    
-    for i, metric in enumerate(metrics):
-        # Berechnung der AUC für die Scores
-        y_true = results_df["target"]
-        y_scores = results_df[metric]
-        
-        if len(y_true.unique()) < 2:
-            print(f"Warnung: Keine negativen Samples für {metric}. AUC wird übersprungen.")
-            continue
-        
-        auc_score = roc_auc_score(y_true, y_scores)
-        auc_results.append({"Metric": metric, "AUC": auc_score})
-        
-        # Plot der Score-Verteilung für HC vs. nicht-HC
-        plt.subplot(1, 3, i+1)
-        sns.kdeplot(data=results_df, x=metric, hue="Diagnosis", common_norm=False)
-        plt.title(f"{metric.replace('_', ' ').title()} (AUC = {auc_score:.3f})")
-        plt.xlabel(metric.replace("_", " ").title())
-        plt.ylabel("Density")
-    
-    plt.tight_layout()
-    plt.savefig(f"{save_dir}/figures/roc/score_distributions.png", dpi=300)
-    plt.close()
-    
-    # Speichern der AUC-Werte als CSV
-    auc_df = pd.DataFrame(auc_results)
-    auc_df.to_csv(f"{save_dir}/auc_results.csv", index=False)
-    
-    return auc_df
-
-
-
-# def find_top_deviant_regions(results_df, save_dir):
-#     """Find and visualize top deviant brain regions for each clinical group."""
-#     os.makedirs(f"{save_dir}/figures/regional", exist_ok=True)
-    
-#     # Get region columns
-#     region_cols = [col for col in results_df.columns if col.startswith('region_')]
-    
-#     # Calculate mean z-score for each region and diagnosis
-#     region_means = results_df.groupby('Diagnosis')[region_cols].mean()
-    
-#     # For each clinical group, find difference from HC
-#     hc_means = region_means.loc['HC']
-    
-#     deviation_results = {}
-    
-#     for diagnosis in ['SCHZ', 'CTT', 'MDD']:
-#         if diagnosis in region_means.index:
-#             # Calculate difference from HC
-#             diff = region_means.loc[diagnosis] - hc_means
-            
-#             # Get top 10 deviant regions
-#             top_regions = diff.abs().sort_values(ascending=False).head(10)
-            
-#             # Store results
-#             deviation_results[diagnosis] = {
-#                 'region_ids': top_regions.index.tolist(),
-#                 'deviations': top_regions.values.tolist()
-#             }
-    
-#     # Plot top deviant regions for each clinical group
-#     plt.figure(figsize=(15, 10))
-    
-#     diagnoses = list(deviation_results.keys())
-#     n_diagnoses = len(diagnoses)
-    
-#     for i, diagnosis in enumerate(diagnoses):
-#         plt.subplot(1, n_diagnoses, i+1)
-        
-#         regions = deviation_results[diagnosis]['region_ids']
-#         deviations = deviation_results[diagnosis]['deviations']
-        
-#         # Convert region_X to region numbers
-#         region_nums = [int(r.split('_')[1]) for r in regions]
-        
-#         # Sort for better visualization
-#         sorted_indices = np.argsort(deviations)
-#         sorted_regions = [region_nums[i] for i in sorted_indices]
-#         sorted_deviations = [deviations[i] for i in sorted_indices]
-        
-#         # Plot horizontal bar chart
-#         plt.barh(range(len(sorted_regions)), sorted_deviations, color='firebrick')
-#         plt.yticks(range(len(sorted_regions)), sorted_regions)
-#         plt.xlabel('Deviation from HC (Z-score)')
-#         plt.ylabel('Region ID')
-#         plt.title(f'Top Deviant Regions for {diagnosis}')
-#         plt.grid(axis='x', linestyle='--', alpha=0.7)
-    
-#     plt.tight_layout()
-#     plt.savefig(f"{save_dir}/figures/regional/top_deviant_regions.png", dpi=300)
-#     plt.close()
-    
-#     # Save region deviations to CSV
-#     for diagnosis, data in deviation_results.items():
-#         region_df = pd.DataFrame({
-#             'region_id': data['region_ids'],
-#             'deviation': data['deviations']
-#         })
-#         region_df.to_csv(f"{save_dir}/top_regions_{diagnosis}.csv", index=False)
-    
-#     return deviation_results
 def visualize_embeddings(normative_models, data_tensor, annotations_df, device="cuda"):
+
     """Visualize data in the latent space of the normative model, ensuring alignment."""
     
     # Sicherstellen, dass die Anzahl der Samples übereinstimmt
@@ -424,746 +310,125 @@ def visualize_embeddings(normative_models, data_tensor, annotations_df, device="
 
     return plt.gcf(), plot_df
 
-def calculate_cliffs_delta(group1, group2):
-    """
-    Calculate Cliff's Delta - a non-parametric effect size measure.
-    
-    Parameters:
-    -----------
-    group1, group2 : array-like
-        The two groups to compare
-        
-    Returns:
-    --------
-    delta : float
-        Cliff's Delta effect size
-    """
-    # Count all pairwise comparisons
-    greater = 0
-    lesser = 0
-    
-    for x in group1:
-        for y in group2:
-            if x > y:
-                greater += 1
-            elif x < y:
-                lesser += 1
-    
-    total_comparisons = len(group1) * len(group2)
-    if total_comparisons == 0:
-        return None
-        
-    # Calculate delta
-    delta = (greater - lesser) / total_comparisons
-    return delta
 
-def calculate_roi_deviation_scores(normative_models, data_tensor, annotations_df, device, roi_names):
-    """
-    Calculate deviation scores for each subject and keep track of ROI-specific deviations.
-    Returns a DataFrame with deviation scores per subject and per ROI.
-    """
-    # Move models to device
-    models = [model.to(device) for model in normative_models]
-    
-    # Convert to dataset for easier batching
-    dataset = TensorDataset(data_tensor)
-    dataloader = DataLoader(dataset, batch_size=64, shuffle=False)
-    
-    # Initialize lists to store results
-    subject_ids = []
-    diagnoses = []
-    demographics = []
-    deviation_scores = []
-    kl_divergences = []
-    reconstruction_errors = []
-    reconstruction_errors_per_roi = []
-    
-    # Set models to evaluation mode
-    for model in models:
-        model.eval()
-    
-    # Process each batch
-    with torch.no_grad():
-        batch_idx = 0
-        for batch in dataloader:
-            batch_data = batch[0].to(device)
-            batch_size = batch_data.shape[0]
-            batch_start_idx = batch_idx * 64
-            batch_end_idx = batch_start_idx + batch_size
-            
-            # Collect subject information for this batch
-            batch_subject_ids = annotations_df.iloc[batch_start_idx:batch_end_idx]['Subject_ID'].values
-            batch_diagnoses = annotations_df.iloc[batch_start_idx:batch_end_idx]['Diagnosis'].values
-            
-            # Store demographic information if available
-            if 'Age' in annotations_df.columns and 'Sex' in annotations_df.columns:
-                batch_demographics = zip(
-                    annotations_df.iloc[batch_start_idx:batch_end_idx]['Age'].values,
-                    annotations_df.iloc[batch_start_idx:batch_end_idx]['Sex'].values
-                )
-            else:
-                batch_demographics = [(None, None)] * batch_size
-            
-            subject_ids.extend(batch_subject_ids)
-            diagnoses.extend(batch_diagnoses)
-            demographics.extend(batch_demographics)
-            
-            # Initialize arrays for ensemble results
-            batch_deviations = np.zeros(batch_size)
-            batch_kl_divs = np.zeros(batch_size)
-            batch_rec_errors = np.zeros(batch_size)
-            batch_roi_errors = np.zeros((batch_size, len(roi_names)))  # Store per-ROI errors
-            
-            # Process with each model in the ensemble
-            for idx, model in enumerate(models):
-                # Forward pass
-                recon_batch, mu, logvar = model(batch_data)
-                
-                # Calculate KL Divergence: -0.5 * sum(1 + log(sigma^2) - mu^2 - sigma^2)
-                kl_div = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp(), dim=1)
-                
-                # Calculate reconstruction error per element (per ROI)
-                roi_errors = torch.nn.functional.mse_loss(recon_batch, batch_data, reduction='none')
-                
-                # Sum across any additional dimensions if present
-                if len(roi_errors.shape) > 2:
-                    roi_errors = roi_errors.sum(axis=tuple(range(2, len(roi_errors.shape))))
-                
-                # Get total reconstruction error per subject
-                rec_error = roi_errors.sum(dim=1)
-                
-                # Deviation score = reconstruction error + KL divergence
-                deviation = rec_error + kl_div
-                
-                # Update ensemble results
-                batch_deviations += deviation.cpu().numpy()
-                batch_kl_divs += kl_div.cpu().numpy()
-                batch_rec_errors += rec_error.cpu().numpy()
-                batch_roi_errors += roi_errors.cpu().numpy()  # Add per-ROI errors
-            
-            # Average across ensemble
-            batch_deviations /= len(models)
-            batch_kl_divs /= len(models)
-            batch_rec_errors /= len(models)
-            batch_roi_errors /= len(models)
-            
-            deviation_scores.extend(batch_deviations)
-            kl_divergences.extend(batch_kl_divs)
-            reconstruction_errors.extend(batch_rec_errors)
-            reconstruction_errors_per_roi.extend(batch_roi_errors)
-            
-            batch_idx += 1
-    
-    # Create a main DataFrame with deviation scores per subject
-    main_data = {
-        'Subject_ID': subject_ids,
-        'Diagnosis': diagnoses,
-        'deviation_score': deviation_scores,
-        'reconstruction_error': reconstruction_errors,
-        'kl_divergence': kl_divergences
-    }
-    
-    # Add demographic information if available
-    if demographics[0][0] is not None:
-        main_data['Age'] = [d[0] for d in demographics]
-        main_data['Sex'] = [d[1] for d in demographics]
-    
-    main_df = pd.DataFrame(main_data)
-    
-    # Create a separate DataFrame for ROI-specific errors
-    roi_data = {
-        'Subject_ID': subject_ids,
-        'Diagnosis': diagnoses,
-    }
-    
-    # Add columns for each ROI's reconstruction error
-    for i, roi_name in enumerate(roi_names):
-        roi_data[roi_name] = [errors[i] for errors in reconstruction_errors_per_roi]
-    
-    roi_df = pd.DataFrame(roi_data)
-    
-    # Join the DataFrames
-    result_df = pd.merge(main_df, roi_df, on=['Subject_ID', 'Diagnosis'])
-    
-    return result_df
+def extract_roi_names(h5_file_path):
+    """Extract ROI names from HDF5 file, skipping the first two entries (Filename, Volume)."""
+    with h5py.File(h5_file_path, 'r') as h5_file:
+        dataset_name = list(h5_file.keys())[0]  # Assuming the first dataset contains ROI names
+        roi_names = list(h5_file[dataset_name].keys())[2:]  # Skip first two (Filename, Volume)
+    return roi_names
 
-def plot_diagnosis_deviation_boxplots(results_df, metric, save_dir, roi_names=None):
-    """
-    Plot boxplots of deviation metrics by diagnosis, similar to the screenshot.
-    
-    Parameters:
-    -----------
-    results_df : pandas DataFrame
-        DataFrame containing deviation scores and diagnosis info
-    metric : str
-        Metric to plot (one of 'deviation_score', 'reconstruction_error', 'kl_divergence')
-    save_dir : str
-        Directory to save plots
-    roi_names : list, optional
-        If provided, create separate plots for each ROI
-    """
-    # Create overall deviation plot
-    plt.figure(figsize=(10, 6))
-    
-    # Order diagnoses as in screenshot: HC, EMCH (if present), LMCH (if present), AD (SCHZ/CTT/MDD)
-    diagnosis_order = []
-    if 'HC' in results_df['Diagnosis'].unique():
-        diagnosis_order.append('HC')
-    if 'EMCH' in results_df['Diagnosis'].unique():
-        diagnosis_order.append('EMCH')
-    if 'LMCH' in results_df['Diagnosis'].unique():
-        diagnosis_order.append('LMCH')
-    
-    # Add the disease groups - ensure they're in results first
-    for diag in ['SCHZ', 'CTT', 'MDD']:
-        if diag in results_df['Diagnosis'].unique():
-            diagnosis_order.append(diag)
-    
-    # Filter to only include diagnoses that are present in the data
-    diagnosis_order = [d for d in diagnosis_order if d in results_df['Diagnosis'].unique()]
-    
-    # Create main deviation plot (horizontal boxplot like in screenshot)
-    plt.figure(figsize=(10, 6))
-    sns.boxplot(
-        data=results_df,
-        x=metric,
-        y='Diagnosis',
-        order=diagnosis_order,
-        orient='h',
-        whis=[5, 95]
-    )
-    
-    plt.grid(True, linestyle='--', alpha=0.7)
-    plt.title(f"{metric.replace('_', ' ').title()} by Diagnosis", fontsize=16)
-    plt.tight_layout()
-    plt.savefig(f"{save_dir}/figures/{metric}_by_diagnosis.png", dpi=300)
-    plt.close()
-    
-    # If ROI names are provided, create plots for each ROI
-    if roi_names and isinstance(roi_names, list):
-        # To avoid creating too many plots, just plot the top ROIs with highest variance across diagnoses
-        # First, calculate the variance for each ROI across diagnoses
-        roi_variance = {}
-        
-        for roi in roi_names:
-            # Calculate mean deviation for each diagnosis for this ROI
-            diagnosis_means = results_df.groupby('Diagnosis')[roi].mean()
-            # Calculate variance of these means
-            if len(diagnosis_means) > 1:  # Need at least 2 groups for variance
-                roi_variance[roi] = diagnosis_means.var()
-        
-        # Sort ROIs by variance and take top 10
-        top_rois = sorted(roi_variance.items(), key=lambda x: x[1], reverse=True)[:10]
-        top_roi_names = [roi for roi, _ in top_rois]
-        
-        # Create a separate plot for top ROIs
-        plt.figure(figsize=(12, 8))
-        
-        # Create a DataFrame in long format for plotting
-        plot_data = []
-        for diagnosis in diagnosis_order:
-            for roi in top_roi_names:
-                diag_values = results_df[results_df['Diagnosis'] == diagnosis][roi].values
-                if len(diag_values) > 0:  # Only if we have data
-                    for value in diag_values:
-                        plot_data.append({
-                            'Diagnosis': diagnosis,
-                            'ROI': roi,
-                            'Deviation': value
-                        })
-        
-        plot_df = pd.DataFrame(plot_data)
-        
-        # Create the plot
-        g = sns.FacetGrid(plot_df, col='ROI', col_wrap=3, height=4, sharey=False)
-        g.map_dataframe(sns.boxplot, x='Diagnosis', y='Deviation', order=diagnosis_order)
-        g.set_titles('{col_name}')
-        g.set_axis_labels('Diagnosis', 'Deviation')
-        plt.tight_layout()
-        plt.savefig(f"{save_dir}/figures/top_roi_deviations.png", dpi=300)
-        plt.close()
 
-def calculate_roi_contribution(results_df, save_dir, roi_names):
+def analyze_regional_deviations(results_df, save_dir, clinical_data_path):
     """
-    Calculate the contribution of each ROI to overall deviation within each diagnosis group
-    using Cliff's Delta as the effect size measure.
+    Analyze and visualize regional deviations while ensuring ROI names match correctly.
     """
-    # Prepare for statistical testing
-    diagnoses = results_df['Diagnosis'].unique().tolist()
-    metrics = ["reconstruction_error", "kl_divergence", "deviation_score"]
+    # Extract original ROI names from HDF5 file
+    roi_names = extract_roi_names(clinical_data_path)
     
-    # Container for results
-    stats_results = []
+    # Get all region columns from results_df
+    region_cols = [col for col in results_df.columns if col.startswith("region_")]
     
-    # For each diagnosis and each ROI, calculate Cliff's Delta against overall deviation
-    for diagnosis in diagnoses:
-        diagnosis_df = results_df[results_df['Diagnosis'] == diagnosis]
+    # Ensure correct mapping of regions to original ROI names
+    if len(region_cols) == len(roi_names):
+        roi_mapping = {region_cols[i]: roi_names[i] for i in range(len(region_cols))}
+    else:
+        print("Mismatch between extracted ROI names and DataFrame columns! Using fallback names.")
+        roi_mapping = {region_cols[i]: f"Region_{i}" for i in range(len(region_cols))}
+    
+    # Rename columns in results_df
+    results_df.rename(columns=roi_mapping, inplace=True)
+    
+    # Get patient groups (excluding HC)
+    patient_groups = [dx for dx in results_df["Diagnosis"].unique() if dx != "HC"]
+    
+    # Function to calculate Cliff's delta
+    def cliff_delta(x, y):
+        """Calculate Cliff's delta for two samples."""
+        n1, n2 = len(x), len(y)
+        if n1 == 0 or n2 == 0:
+            return None
         
-        # Skip if insufficient data
-        if len(diagnosis_df) < 2:
+        greater, lesser = 0, 0
+        for i in range(n1):
+            for j in range(n2):
+                if x[i] > y[j]:
+                    greater += 1
+                elif x[i] < y[j]:
+                    lesser += 1
+        
+        return (greater - lesser) / (n1 * n2)
+    
+    results = []
+    
+    # Calculate effect sizes for each region and patient group
+    for group in patient_groups:
+        if sum(results_df["Diagnosis"] == group) == 0:
             continue
-            
-        # Get the overall deviation score for this diagnosis
-        overall_dev = diagnosis_df['deviation_score'].values
         
-        # For each ROI, calculate Cliff's Delta vs overall deviation
-        for roi in roi_names:
-            roi_values = diagnosis_df[roi].values
+        for region_col in region_cols:
+            roi_name = roi_mapping[region_col]
             
-            # Calculate Cliff's Delta for ROI vs overall deviation
-            delta = calculate_cliffs_delta(roi_values, overall_dev)
+            patient_data = results_df[results_df["Diagnosis"] == group][region_col].values
+            hc_data = results_df[results_df["Diagnosis"] == "HC"][region_col].values
             
-            # Check if Cliff's Delta was calculated successfully
-            if delta is not None:
-                # Also calculate Cohen's d for reference
-                pooled_std = np.sqrt(((len(roi_values) - 1) * np.var(roi_values) + 
-                                    (len(overall_dev) - 1) * np.var(overall_dev)) / 
-                                    (len(roi_values) + len(overall_dev) - 2))
+            if len(patient_data) == 0 or len(hc_data) == 0:
+                continue
                 
-                effect_size = None
-                if pooled_std > 0:
-                    effect_size = np.abs(np.mean(roi_values) - np.mean(overall_dev)) / pooled_std
-                
-                # Store results
-                stats_results.append({
-                    'Diagnosis': diagnosis,
-                    'ROI': roi,
-                    'Cliff_Delta': delta,
-                    'Cohens_d': effect_size,
-                    'ROI_Mean': np.mean(roi_values),
-                    'ROI_Std': np.std(roi_values),
-                    'Overall_Mean': np.mean(overall_dev),
-                    'Overall_Std': np.std(overall_dev)
-                })
+            delta = cliff_delta(patient_data, hc_data)
+            patient_mean = np.mean(patient_data)
+            hc_mean = np.mean(hc_data)
+            
+            pooled_std = np.sqrt(((len(patient_data) - 1) * np.var(patient_data) + 
+                                 (len(hc_data) - 1) * np.var(hc_data)) / 
+                                 (len(patient_data) + len(hc_data) - 2))
+            cohens_d = (patient_mean - hc_mean) / pooled_std if pooled_std > 0 else 0
+            
+            results.append({
+                "Diagnosis": group,
+                "Region_Column": region_col,
+                "Region_Name": roi_name,
+                "Cliff_Delta": delta,
+                "Cohens_d": cohens_d,
+                "Patient_Mean": patient_mean,
+                "HC_Mean": hc_mean,
+                "Mean_Difference": patient_mean - hc_mean
+            })
     
-    # Convert to DataFrame
-    stats_df = pd.DataFrame(stats_results)
+    effect_sizes_df = pd.DataFrame(results)
     
     # Save results
-    stats_df.to_csv(f"{save_dir}/roi_contribution.csv", index=False)
+    effect_sizes_df.to_csv(f"{save_dir}/regional_effect_sizes.csv", index=False)
     
-    # Create visualizations of ROI contributions
-    # For each diagnosis, find top contributing ROIs
-    for diagnosis in diagnoses:
-        if diagnosis == 'HC':  # Skip HC as reference group
-            continue
-            
-        diag_stats = stats_df[stats_df['Diagnosis'] == diagnosis].sort_values('Cliff_Delta', ascending=False)
+    # Create visualizations if data exists
+    if len(effect_sizes_df) > 0:
+        os.makedirs(f"{save_dir}/figures", exist_ok=True)
         
-        # If we have data for this diagnosis
-        if len(diag_stats) > 0:
-            # Take top and bottom 10 ROIs by contribution
-            top_n = min(10, len(diag_stats) // 2)
-            top_rois = diag_stats.head(top_n)
-            bottom_rois = diag_stats.tail(top_n)
-            plot_rois = pd.concat([top_rois, bottom_rois])
+        for group in effect_sizes_df["Diagnosis"].unique():
+            group_data = effect_sizes_df[effect_sizes_df["Diagnosis"] == group].sort_values("Cliff_Delta", ascending=False)
+            top_n = min(20, len(group_data))
+            top_regions = group_data.head(top_n)
             
-            # Plot Cliff's Delta for these ROIs
             plt.figure(figsize=(12, 8))
-            
-            # Create horizontal bar plot
-            bars = plt.barh(
-                plot_rois['ROI'],
-                plot_rois['Cliff_Delta'],
-                color=plt.cm.RdBu_r(np.linspace(0, 1, len(plot_rois)))
-            )
-            
-            plt.axvline(x=0, color='black', linestyle='-', alpha=0.7)
-            plt.grid(axis='x', linestyle='--', alpha=0.7)
-            plt.title(f"ROI Contribution to Overall Deviation - {diagnosis}", fontsize=16)
-            plt.xlabel("Cliff's Delta (Effect Size)", fontsize=14)
-            plt.ylabel("Region of Interest", fontsize=14)
+            sns.barplot(x="Cliff_Delta", y="Region_Name", data=top_regions, palette="viridis")
+            plt.title(f"Top {top_n} Brain Regions with Highest Deviation in {group} vs HC", fontsize=14)
+            plt.xlabel("Cliff's Delta")
+            plt.ylabel("Brain Region")
             plt.tight_layout()
-            plt.savefig(f"{save_dir}/figures/{diagnosis}_roi_contribution.png", dpi=300)
+            plt.savefig(f"{save_dir}/figures/top_regions_{group}_cliffs_delta.png", dpi=300)
             plt.close()
-    
-    return stats_df
-
-def compute_brain_regions_deviations(diff_df, diagnosis_column, diagnosis_value, hc_label="HC"):
-    """
-    Calculate the Cliff's delta effect size between groups using the approach from the original paper.
-    
-    Parameters:
-    - diff_df: DataFrame containing region deviation values
-    - diagnosis_column: column name containing diagnosis labels
-    - diagnosis_value: value of the diagnosis to compare with HC
-    - hc_label: label for healthy controls (default: "HC")
-    
-    Returns:
-    - region_df: DataFrame with region names, p-values, and effect sizes
-    """
-    region_df = pd.DataFrame(columns=['regions', 'pvalue', 'effect_size'])
-    
-    # Get data for the clinical group and healthy controls
-    diff_hc = diff_df[diff_df[diagnosis_column] == hc_label]
-    diff_patient = diff_df[diff_df[diagnosis_column] == diagnosis_value]
-    
-    # Get a list of all brain regions (columns excluding Subject_ID, Diagnosis, etc.)
-    all_columns = diff_df.columns
-    non_region_columns = ['Subject_ID', 'Diagnosis', 'deviation_score', 'reconstruction_error', 'kl_divergence', 'Age', 'Sex']
-    region_columns = [col for col in all_columns if col not in non_region_columns]
-    
-    # Calculate effect size for each brain region
-    for region in region_columns:
-        try:
-            # Calculate Mann-Whitney U test p-value
-            _, pvalue = stats.mannwhitneyu(diff_hc[region], diff_patient[region])
-            
-            # Calculate Cliff's delta effect size
-            effect_size = cliff_delta(diff_patient[region].values, diff_hc[region].values)
-            
-            # Add to results DataFrame
-            new_row = {
-                'regions': region,
-                'pvalue': pvalue,
-                'effect_size': effect_size
-            }
-            region_df = pd.concat([region_df, pd.DataFrame([new_row])], ignore_index=True)
         
-        except Exception as e:
-            print(f"Error processing region {region}: {e}")
-    
-    return region_df
-
-def create_auc_roc_figure(tpr_list, auc_roc_list, save_path):
-    """
-    Create AUC-ROC curve figure similar to Figure 3 in the original paper.
-    """
-    tpr_list = np.array(tpr_list)
-    mean_tprs = tpr_list.mean(axis=0)
-    tprs_upper = np.percentile(tpr_list, 97.5, axis=0)
-    tprs_lower = np.percentile(tpr_list, 2.5, axis=0)
-    
-    plt.figure(figsize=(8, 6))
-    plt.plot(
-        np.linspace(0, 1, len(mean_tprs)),
-        mean_tprs,
-        'b', 
-        lw=2,
-        label=f'ROC curve (AUC = {np.mean(auc_roc_list):.3f} ; 95% CI [{np.percentile(auc_roc_list, 2.5):.3f}, {np.percentile(auc_roc_list, 97.5):.3f}])'
-    )
-    
-    plt.fill_between(
-        np.linspace(0, 1, len(mean_tprs)),
-        tprs_lower, 
-        tprs_upper,
-        color='grey', 
-        alpha=0.2
-    )
-    
-    plt.plot([0, 1], [0, 1], 'r--')
-    plt.xlim([0, 1])
-    plt.ylim([0, 1.05])
-    plt.ylabel('True Positive Rate')
-    plt.xlabel('False Positive Rate')
-    plt.legend(loc='lower right')
-    plt.tight_layout()
-    plt.savefig(save_path, format='png', dpi=300)
-    plt.close()
-
-def create_effect_size_figure(effect_size_df, roi_names, save_path, title="Brain Regions Effect Size"):
-    """
-    Create a figure showing effect sizes across brain regions similar to the supplementary figure in the original paper.
-    
-    Parameters:
-    - effect_size_df: DataFrame with effect sizes for each ROI
-    - roi_names: list of ROI names
-    - save_path: path to save the figure
-    - title: title for the figure
-    """
-    # Sort effect sizes
-    effect_size_df = effect_size_df.sort_values(by='effect_size')
-    
-    # Create figure
-    plt.figure(figsize=(12, max(8, len(effect_size_df) * 0.3)))  # Dynamic figure height based on number of ROIs
-    
-    # Plot horizontal lines for confidence intervals if available
-    if 'ci_lower' in effect_size_df.columns and 'ci_upper' in effect_size_df.columns:
-        plt.hlines(
-            y=range(len(effect_size_df)),
-            xmin=effect_size_df['ci_lower'],
-            xmax=effect_size_df['ci_upper'],
-            linewidth=1.5
-        )
-    
-    # Plot effect sizes
-    plt.plot(
-        effect_size_df['effect_size'],
-        range(len(effect_size_df)),
-        's',
-        color='k',
-        markersize=5
-    )
-    
-    # Add reference line at zero
-    plt.axvline(0, ls='--', color='gray')
-    
-    # Set y-ticks to ROI names
-    plt.yticks(range(len(effect_size_df)), effect_size_df['regions'])
-    
-    # Set labels and title
-    plt.xlabel('Effect size (Cliff\'s delta)')
-    plt.ylabel('Brain regions')
-    plt.title(title)
-    
-    # Adjust layout and save
-    plt.tight_layout()
-    plt.savefig(save_path, format='png', dpi=300)
-    plt.close()
-
-def create_significant_regions_figure(effect_size_df, alpha=0.05, save_path=None):
-    """
-    Create a figure showing only significant regions based on Figure 4 in the original paper.
-    
-    Parameters:
-    - effect_size_df: DataFrame with effect sizes and p-values for each ROI
-    - alpha: significance threshold (default: 0.05)
-    - save_path: path to save the figure
-    
-    Returns:
-    - filtered_df: DataFrame containing only significant regions
-    """
-    # Apply multiple comparison correction (FDR)
-    from statsmodels.stats.multitest import multipletests
-    
-    # Perform Benjamini-Hochberg FDR correction
-    significant = multipletests(effect_size_df['pvalue'], alpha=alpha, method='fdr_bh')[0]
-    
-    # Filter for significant regions
-    significant_df = effect_size_df[significant].copy()
-    
-    # Sort by effect size
-    significant_df = significant_df.sort_values(by='effect_size')
-    
-    # If no significant regions, return original DataFrame
-    if len(significant_df) == 0:
-        print("No significant regions found after multiple comparison correction.")
-        return effect_size_df
-    
-    # Create figure
-    plt.figure(figsize=(12, max(6, len(significant_df) * 0.4)))  # Dynamic figure height
-    
-    # Plot horizontal lines for confidence intervals if available
-    if 'ci_lower' in significant_df.columns and 'ci_upper' in significant_df.columns:
-        plt.hlines(
-            y=range(len(significant_df)),
-            xmin=significant_df['ci_lower'],
-            xmax=significant_df['ci_upper'],
-            linewidth=1.5
-        )
-    
-    # Plot effect sizes
-    plt.plot(
-        significant_df['effect_size'],
-        range(len(significant_df)),
-        's',
-        color='k',
-        markersize=6
-    )
-    
-    # Add reference line at zero
-    plt.axvline(0, ls='--', color='gray')
-    
-    # Set y-ticks to ROI names
-    plt.yticks(range(len(significant_df)), significant_df['regions'])
-    
-    # Set labels and title
-    plt.xlabel('Effect size (Cliff\'s delta)')
-    plt.ylabel('Significant brain regions')
-    plt.title(f'Significant Regions (FDR-corrected p < {alpha})')
-    
-    # Adjust layout and save
-    plt.tight_layout()
-    if save_path:
-        plt.savefig(save_path, format='png', dpi=300)
+        heatmap_data = effect_sizes_df.pivot_table(index="Region_Name", columns="Diagnosis", values="Cliff_Delta")
+        heatmap_data["max_abs"] = heatmap_data.abs().max(axis=1)
+        heatmap_data = heatmap_data.sort_values("max_abs", ascending=False).drop("max_abs", axis=1)
+        top_n_heatmap = min(30, len(heatmap_data))
+        top_heatmap_data = heatmap_data.head(top_n_heatmap)
+        
+        plt.figure(figsize=(12, 14))
+        sns.heatmap(top_heatmap_data, cmap="RdBu_r", center=0, annot=True, fmt=".2f", linewidths=.5, cbar_kws={"label": "Cliff's Delta"})
+        plt.title(f"Top {top_n_heatmap} Regions by Effect Size Across Diagnostic Groups", fontsize=16)
+        plt.tight_layout()
+        plt.savefig(f"{save_dir}/figures/region_effect_sizes_heatmap.png", dpi=300)
         plt.close()
     
-    return significant_df
-
-def create_significant_regions_figure(effect_size_df, alpha=0.05, save_path=None):
-    """
-    Create a figure showing only significant regions based on Figure 4 in the original paper.
-    
-    Parameters:
-    - effect_size_df: DataFrame with effect sizes and p-values for each ROI
-    - alpha: significance threshold (default: 0.05)
-    - save_path: path to save the figure
-    
-    Returns:
-    - filtered_df: DataFrame containing only significant regions
-    """
-    # Apply multiple comparison correction (FDR)
-    from statsmodels.stats.multitest import multipletests
-    
-    # Perform Benjamini-Hochberg FDR correction
-    significant = multipletests(effect_size_df['pvalue'], alpha=alpha, method='fdr_bh')[0]
-    
-    # Filter for significant regions
-    significant_df = effect_size_df[significant].copy()
-    
-    # Sort by effect size
-    significant_df = significant_df.sort_values(by='effect_size')
-    
-    # If no significant regions, return original DataFrame
-    if len(significant_df) == 0:
-        print("No significant regions found after multiple comparison correction.")
-        return effect_size_df
-    
-    # Create figure
-    plt.figure(figsize=(12, max(6, len(significant_df) * 0.4)))  # Dynamic figure height
-    
-    # Plot horizontal lines for confidence intervals if available
-    if 'ci_lower' in significant_df.columns and 'ci_upper' in significant_df.columns:
-        plt.hlines(
-            y=range(len(significant_df)),
-            xmin=significant_df['ci_lower'],
-            xmax=significant_df['ci_upper'],
-            linewidth=1.5
-        )
-    
-    # Plot effect sizes
-    plt.plot(
-        significant_df['effect_size'],
-        range(len(significant_df)),
-        's',
-        color='k',
-        markersize=6
-    )
-    
-    # Add reference line at zero
-    plt.axvline(0, ls='--', color='gray')
-    
-    # Set y-ticks to ROI names
-    plt.yticks(range(len(significant_df)), significant_df['regions'])
-    
-    # Set labels and title
-    plt.xlabel('Effect size (Cliff\'s delta)')
-    plt.ylabel('Significant brain regions')
-    plt.title(f'Significant Regions (FDR-corrected p < {alpha})')
-    
-    # Adjust layout and save
-    plt.tight_layout()
-    if save_path:
-        plt.savefig(save_path, format='png', dpi=300)
-        plt.close()
-    
-    return significant_df
-
-def compute_bootstrap_effect_sizes(deviation_df, roi_names, diagnosis_column, diagnosis_values, 
-                                   hc_label="HC", n_bootstrap=1000, seed=42):
-    """
-    Compute bootstrap effect sizes for each diagnosis vs. healthy controls.
-    
-    Parameters:
-    - deviation_df: DataFrame with deviation scores
-    - roi_names: list of ROI names
-    - diagnosis_column: column containing diagnosis labels
-    - diagnosis_values: list of diagnosis values to compare with HC
-    - hc_label: label for healthy controls
-    - n_bootstrap: number of bootstrap iterations
-    - seed: random seed for reproducibility
-    
-    Returns:
-    - bootstrap_results: dictionary with bootstrap effect sizes for each diagnosis
-    """
-    np.random.seed(seed)
-    bootstrap_results = {}
-    
-    # Get data for healthy controls
-    hc_data = deviation_df[deviation_df[diagnosis_column] == hc_label]
-    
-    # For each diagnosis
-    for diagnosis in diagnosis_values:
-        if diagnosis == hc_label:
-            continue
-        
-        print(f"Computing bootstrap effect sizes for {diagnosis} vs {hc_label}...")
-        
-        # Get data for current diagnosis
-        dx_data = deviation_df[deviation_df[diagnosis_column] == diagnosis]
-        
-        # Initialize arrays to store bootstrap results
-        effect_sizes = np.zeros((n_bootstrap, len(roi_names)))
-        
-        # Get a list of ROI columns (excluding non-ROI columns)
-        non_roi_columns = ['Subject_ID', 'Diagnosis', 'deviation_score', 'reconstruction_error', 'kl_divergence']
-        if 'Age' in deviation_df.columns:
-            non_roi_columns.append('Age')
-        if 'Sex' in deviation_df.columns:
-            non_roi_columns.append('Sex')
-        roi_columns = [col for col in deviation_df.columns if col not in non_roi_columns]
-        
-        # Perform bootstrap
-        for i in tqdm(range(n_bootstrap), desc=f"Bootstrap for {diagnosis}"):
-            # Sample with replacement
-            hc_sample = hc_data.sample(n=len(hc_data), replace=True)
-            dx_sample = dx_data.sample(n=len(dx_data), replace=True)
-            
-            # Calculate effect size for each ROI
-            for j, roi in enumerate(roi_columns):
-                effect_sizes[i, j] = cliff_delta(dx_sample[roi].values, hc_sample[roi].values)
-        
-        # Calculate mean effect size and confidence intervals
-        mean_effect_sizes = np.mean(effect_sizes, axis=0)
-        lower_ci = np.percentile(effect_sizes, 2.5, axis=0)
-        upper_ci = np.percentile(effect_sizes, 97.5, axis=0)
-        
-        # Create DataFrame
-        effect_size_df = pd.DataFrame({
-            'regions': roi_columns,
-            'effect_size': mean_effect_sizes,
-            'ci_lower': lower_ci,
-            'ci_upper': upper_ci
-        })
-        
-        # Calculate p-values
-        p_values = []
-        for j, roi in enumerate(roi_columns):
-            # Two-sided p-value: proportion of bootstrap samples crossing zero
-            if mean_effect_sizes[j] > 0:
-                p_value = np.mean(effect_sizes[:, j] <= 0)
-            else:
-                p_value = np.mean(effect_sizes[:, j] >= 0)
-            # Multiply by 2 for two-sided test
-            p_values.append(min(p_value * 2, 1.0))
-        
-        effect_size_df['pvalue'] = p_values
-        
-        # Store in results
-        bootstrap_results[diagnosis] = effect_size_df
-    
-    return bootstrap_results
-
-def compute_classification_performance(deviation_df, clinical_df, metric='deviation_score', diagnosis_label="SCHZ", hc_label="HC"):
-    """
-    Calculate the AUCs of the normative model based on specified metric.
-    Similar to compute_classification_performance in the original paper.
-    
-    Parameters:
-    - deviation_df: DataFrame with deviation scores
-    - clinical_df: DataFrame with clinical data
-    - metric: metric to use for classification (default: 'deviation_score')
-    - diagnosis_label: label for the disease group
-    - hc_label: label for healthy controls
-    
-    Returns:
-    - roc_auc: Area Under the ROC Curve
-    - tpr: True Positive Rate values
-    """
-    error_hc = deviation_df.loc[deviation_df['Diagnosis'] == hc_label][metric].values
-    error_patient = deviation_df.loc[deviation_df['Diagnosis'] == diagnosis_label][metric].values
-    
-    # Create binary labels (0 for HC, 1 for patients)
-    labels = np.concatenate([np.zeros_like(error_hc), np.ones_like(error_patient)])
-    scores = np.concatenate([error_hc, error_patient])
-    
-    # Compute ROC curve
-    fpr, tpr, _ = roc_curve(labels, scores)
-    roc_auc = auc(fpr, tpr)
-    
-    # Interpolate TPR to standardized FPR values
-    standardized_fpr = np.linspace(0, 1, 101)
-    interpolated_tpr = np.interp(standardized_fpr, fpr, tpr)
-    interpolated_tpr[0] = 0.0  # Ensure starts at 0
-    
-    return roc_auc, interpolated_tpr
+    return effect_sizes_df

@@ -29,7 +29,14 @@ from module.data_processing_hc import (
     process_subjects,
 )
 from utils.logging_utils import setup_logging_test, log_and_print_test
-from utils.dev_scores_utils import calculate_deviations, plot_deviation_distributions, analyze_score_auc, visualize_embeddings, calculate_cliffs_delta #,find_top_deviant_regions,
+from utils.dev_scores_utils import (
+    calculate_deviations, 
+    plot_deviation_distributions, 
+    visualize_embeddings, 
+    calculate_cliffs_delta 
+    #,find_top_deviant_regions,
+
+)
 
 #--------------------------------------- NECESSARY ARGUMENTS -----------------------------------------------------
 model_dir = "/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/normative_results_20250515_101655" #dir of trained models
