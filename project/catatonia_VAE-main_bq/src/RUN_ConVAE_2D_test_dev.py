@@ -15,7 +15,7 @@ import seaborn as sns
 import torch
 from torch.utils.data import DataLoader, TensorDataset
 from scipy import stats
-from sklearn.metrics import roc_curve, auc, precision_recall_curve
+
 import umap
 
 # Ensure we can import from parent directory
@@ -26,16 +26,15 @@ from utils.config_utils_model import Config_2D
 from module.data_processing_hc import (
     load_mri_data_2D,
     load_mri_data_2D_all_atlases,
-    process_subjects,
+    #process_subjects,
 )
-from utils.logging_utils import setup_logging_test, log_and_print_test
+from utils.logging_utils import setup_logging_test, log_and_print_test, end_logging
 from utils.dev_scores_utils import (
     calculate_deviations, 
     plot_deviation_distributions, 
     visualize_embeddings, 
-    calculate_cliffs_delta 
-    #,find_top_deviant_regions,
-
+    analyze_regional_deviations,
+    extract_roi_names,
 )
 
 #--------------------------------------- NECESSARY ARGUMENTS -----------------------------------------------------
@@ -108,9 +107,24 @@ def main(args):
     # Set paths for clinical data
     path_to_clinical_data = clinical_data_path
     
+    #######
+    # Determine h5_file_path for ROI name extraction before loading subjects
+    if atlas_name != "all":
+        h5_file_path = os.path.join(path_to_clinical_data, f"{atlas_name}.h5")
+    else:
+        all_data_paths = get_all_data(directory=path_to_clinical_data, ext="h5")
+        if all_data_paths:
+            h5_file_path = all_data_paths[0]
+        else:
+            h5_file_path = None
+            log_and_print_test("Warning: No HDF5 files found for ROI name extraction")
+    
+
+    ########
+
     # Load clinical data using the same function as for healthy controls
     if atlas_name != "all":
-        subjects_clinical, annotations_clinical = load_mri_data_2D(
+        subjects_clinical, annotations_clinical,roi_names = load_mri_data_2D(
             csv_paths=[clinical_csv],
             data_path=path_to_clinical_data,
             atlas_name=atlas_name,
@@ -123,7 +137,7 @@ def main(args):
         )
     else:
         all_data_paths = get_all_data(directory=path_to_clinical_data, ext="h5")
-        subjects_clinical, annotations_clinical = load_mri_data_2D_all_atlases(
+        subjects_clinical, annotations_clinical, roi_names = load_mri_data_2D_all_atlases(
             csv_paths=[clinical_csv],
             data_paths=all_data_paths,
             diagnoses=["HC", "SCHZ", "CTT", "MDD"],
@@ -141,6 +155,14 @@ def main(args):
     input_dim = clinical_data.shape[1]
     log_and_print_test(f"Input dimension: {input_dim}")
     
+    #######
+    # Verify ROI names match the data dimension
+    if roi_names is not None and len(roi_names) != input_dim:
+        log_and_print_test(f"Warning: Number of ROI names ({len(roi_names)}) does not match input dimension ({input_dim})")
+        log_and_print_test("Generating new ROI names to match input dimension")
+        roi_names = [f"Region_{i+1}" for i in range(input_dim)]
+    #######
+
     # Count subjects by diagnosis
     diagnosis_counts = annotations_clinical["Diagnosis"].value_counts()
     log_and_print_test(f"Subject counts by diagnosis:\n{diagnosis_counts}")
@@ -159,6 +181,7 @@ def main(args):
             raise FileNotFoundError("No models found in the specified directory.")
     
     # Load up to max_models if specified
+    if args.max_models > 0:
         model_files = model_files[:args.max_models]
     
     for model_file in model_files:
@@ -191,6 +214,19 @@ def main(args):
         device=device
     )
     
+    # Map ROI names to region columns if we have them
+    if roi_names is not None:
+        region_cols = [col for col in results_df.columns if col.startswith("region_")]
+        if len(region_cols) == len(roi_names):
+            # Create a copy of results_df with renamed columns
+            named_results_df = results_df.copy()
+            roi_mapping = dict(zip(region_cols, roi_names))
+            named_results_df.rename(columns=roi_mapping, inplace=True)
+            
+            # Save version with ROI names
+            named_results_df.to_csv(f"{save_dir}/deviation_scores_with_roi_names.csv", index=False)
+            log_and_print_test(f"Saved deviation scores with ROI names to {save_dir}/deviation_scores_with_roi_names.csv")
+    
     # Save deviation scores
     results_df.to_csv(f"{save_dir}/deviation_scores.csv", index=False)
     log_and_print_test(f"Saved deviation scores to {save_dir}/deviation_scores.csv")
@@ -201,14 +237,6 @@ def main(args):
     # Plot deviation distributions
     plot_deviation_distributions(results_df, save_dir)
     log_and_print_test("Plotted deviation distributions")
-    
-    # # Analyze ROC curves
-    # auc_df = analyze_score_auc(results_df, save_dir)
-    # log_and_print_test(f"ROC analysis complete. AUC summary:\n{auc_df.pivot(index='Diagnosis', columns='Metric', values='AUC')}")
-    
-    # # Find top deviant regions
-    # deviation_results = find_top_deviant_regions(results_df, save_dir)
-    # log_and_print_test("Analyzed regional deviations")
     
     # Visualize embeddings in latent space
     log_and_print_test("Visualizing latent space embeddings...")
@@ -225,76 +253,36 @@ def main(args):
     # Run statistical tests between groups
     log_and_print_test("Running statistical tests between groups...")
     
-    # Prepare for statistical testing
-    diagnoses = ["HC", "SCHZ", "CTT", "MDD"]
-    metrics = ["reconstruction_error", "kl_divergence", "deviation_score"]
+
+    ##------------------------------------------------ROI-WISE DEVIATION SCORES --------------------------------------------------
+     
+    log_and_print_test("----------[INFO] Analyzing regional deviations...")
     
-    # Run t-tests for each patient group against HC
-    stats_results = []
+    # Create supplementary files for debugging and reference
+    if h5_file_path and os.path.exists(h5_file_path):
+        
+        # Using our improved regional deviation analysis
+        regional_results = analyze_regional_deviations(
+            results_df=results_df,
+            save_dir=save_dir,
+            clinical_data_path=h5_file_path,
+            volume_type=volume_type,
+            atlas_name=atlas_name,
+            roi_names=roi_names
+        )
+        log_and_print_test(f"Regional deviation analysis complete. Results saved to {save_dir}/regional_effect_sizes.csv")
+    else:
+        log_and_print_test("Warning: Could not analyze regional deviations due to missing HDF5 file.")
     
-    for diagnosis in ["SCHZ", "CTT", "MDD"]:
-        for metric in metrics:
+        log_and_print_test(f"Regional deviation analysis complete. Results saved to {save_dir}/regional_effect_sizes.csv")
+    
+    log_and_print_test(f"Deviation analysis complete! Results saved to {save_dir}")
 
-            dx_values = results_df[results_df["Diagnosis"] == diagnosis][metric].values
-
-            if len(dx_values) > 0:  # Only if we have data for this diagnosis
-                for roi in [col for col in results_df.columns if col.startswith("region_")]:
-                    roi_values = results_df[results_df["Diagnosis"] == diagnosis][roi].values
-                    
-                    if len(roi_values) > 0:  # Sicherstellen, dass ROI-Daten vorhanden sind
-                        # Berechnung von Cliff's Delta für ROI vs. Gesamtdeviation
-                        cliff_delta = calculate_cliffs_delta(roi_values, dx_values)
-                        
-                        if cliff_delta is not None:  # Falls gültig, weiter berechnen
-                            # Berechnung von Cohen's d für ROI vs. Gesamtdeviation
-                            pooled_std = np.sqrt(((len(roi_values) - 1) * np.var(roi_values) + 
-                                                (len(dx_values) - 1) * np.var(dx_values)) / 
-                                                (len(roi_values) + len(dx_values) - 2))
-                            effect_size = np.abs(np.mean(roi_values) - np.mean(dx_values)) / pooled_std
-                            
-                            stats_results.append({
-                                "Diagnosis": diagnosis,
-                                "Metric": metric,
-                                "ROI": roi,
-                                "Cliff's Delta": cliff_delta,
-                                "Cohen's d": effect_size,
-                                "Patient_Mean": np.mean(dx_values),
-                                "Patient_Std": np.std(dx_values),
-                            })
-            
-        # Speichern der statistischen Ergebnisse
-    stats_df = pd.DataFrame(stats_results)
-    stats_df.to_csv(f"{save_dir}/statistical_tests.csv", index=False)
-    log_and_print_test(f"Statistical analysis complete. Results saved to {save_dir}/statistical_tests.csv")
-
-    # Erstellen der Zusammenfassungstabelle
-    summary_table = stats_df.pivot_table(
-        index="Diagnosis", 
-        columns="Metric", 
-        values=["Cliff's Delta", "Patient_Mean", "Patient_Std"],
-        aggfunc="first"
-    )
-
-    log_and_print_test("Analysis summary by diagnosis:")
-    log_and_print_test("\nCliff's delta values:")
-    log_and_print_test(summary_table["Cliff's Delta"])
-    log_and_print_test("\nPatient mean values:")
-    log_and_print_test(summary_table["Patient_Mean"])
-    log_and_print_test("\nPatient standard deviations:")
-    log_and_print_test(summary_table["Patient_Std"])
-
-    # plt.figure(figsize=(10, 6))
-    # cliff_delta_df = stats_df.pivot(index="Diagnosis", columns="Metric", values="Cliff's Delta")
-    # cliff_delta_df.plot(kind="bar", rot=0)
-    # plt.title("Cliff's Delta by Diagnosis and Metric", fontsize=16)
-    # plt.ylabel("Cliff's Delta", fontsize=14)
-    # plt.grid(axis="y", linestyle="--", alpha=0.7)
-    # plt.tight_layout()
-    # plt.savefig(f"{save_dir}/figures/cliffs_delta.png", dpi=300)
-    # plt.close()
-
+    #-----------------------------------------------------------------------------------------------------------------------------
 
     log_and_print_test(f"Deviation analysis complete! Results saved to {save_dir}")
+    end_logging(Config_2D)
+
     return save_dir 
 
 if __name__ == "__main__":

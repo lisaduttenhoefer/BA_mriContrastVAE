@@ -311,124 +311,194 @@ def visualize_embeddings(normative_models, data_tensor, annotations_df, device="
     return plt.gcf(), plot_df
 
 
-def extract_roi_names(h5_file_path):
-    """Extract ROI names from HDF5 file, skipping the first two entries (Filename, Volume)."""
-    with h5py.File(h5_file_path, 'r') as h5_file:
-        dataset_name = list(h5_file.keys())[0]  # Assuming the first dataset contains ROI names
-        roi_names = list(h5_file[dataset_name].keys())[2:]  # Skip first two (Filename, Volume)
+def extract_roi_names(h5_file_path, volume_type="Vgm"):
+    """
+    Extract ROI names from HDF5 file.
+    
+    Args:
+        h5_file_path (str): Path to HDF5 file
+        volume_type (str): Volume type to extract (Vgm, Vwm, csf)
+        
+    Returns:
+        list: List of ROI names
+    """
+    import h5py
+    
+    roi_names = []
+    try:
+        with h5py.File(h5_file_path, 'r') as f:
+            # Most HDF5 files store ROI names as attributes or as dataset
+            if volume_type in f:
+                # Get ROI names from dataset attributes if they exist
+                if 'roi_names' in f[volume_type].attrs:
+                    roi_names = [name.decode('utf-8') if isinstance(name, bytes) else str(name) 
+                               for name in f[volume_type].attrs['roi_names']]
+                # Get ROI names from specific dataset if it exists
+                elif 'roi_names' in f[volume_type]:
+                    roi_names = [name.decode('utf-8') if isinstance(name, bytes) else str(name) 
+                               for name in f[volume_type]['roi_names'][:]]
+                # Try to get indices/keys that correspond to measurements
+                elif 'measurements' in f[volume_type]:
+                    # Some HDF5 files have indices stored separately
+                    if 'indices' in f[volume_type]:
+                        roi_names = [str(idx) for idx in f[volume_type]['indices'][:]]
+                    else:
+                        num_rois = f[volume_type]['measurements'].shape[1]
+                        roi_names = [f"ROI_{i+1}" for i in range(num_rois)]
+            else:
+                # Try to look for ROI names at the root level
+                if 'roi_names' in f.attrs:
+                    roi_names = [name.decode('utf-8') if isinstance(name, bytes) else str(name) 
+                               for name in f.attrs['roi_names']]
+                elif 'roi_names' in f:
+                    roi_names = [name.decode('utf-8') if isinstance(name, bytes) else str(name) 
+                               for name in f['roi_names'][:]]
+                # Try to infer from top-level structure
+                else:
+                    # Sometimes ROIs are stored as separate datasets
+                    roi_candidates = [key for key in f.keys() if key != 'metadata']
+                    if roi_candidates:
+                        roi_names = roi_candidates
+    except Exception as e:
+        print(f"Error extracting ROI names from {h5_file_path}: {e}")
+    
+    # If still no ROI names, create generic ones based on atlas name
+    if not roi_names:
+        from pathlib import Path
+        atlas_name = Path(h5_file_path).stem
+        # Try to get the number of measurements from the file
+        try:
+            with h5py.File(h5_file_path, 'r') as f:
+                if volume_type in f and 'measurements' in f[volume_type]:
+                    num_rois = f[volume_type]['measurements'].shape[1]
+                else:
+                    num_rois = 100  # Default assumption
+                roi_names = [f"{atlas_name}_ROI_{i+1}" for i in range(num_rois)]
+        except:
+            roi_names = [f"{atlas_name}_ROI_{i+1}" for i in range(100)]  # Assume max 100 ROIs
+    
     return roi_names
 
-
-def analyze_regional_deviations(results_df, save_dir, clinical_data_path):
+def analyze_regional_deviations(results_df, save_dir, clinical_data_path, volume_type, atlas_name, roi_names):
     """
-    Analyze and visualize regional deviations while ensuring ROI names match correctly.
-    """
-    # Extract original ROI names from HDF5 file
-    roi_names = extract_roi_names(clinical_data_path)
+    Analyze regional deviations using ROI names extracted from HDF5 file.
     
-    # Get all region columns from results_df
+    Args:
+        results_df (pd.DataFrame): DataFrame with deviation scores
+        save_dir (str): Directory to save results
+        clinical_data_path (str): Path to HDF5 file with ROI names
+        volume_type (str): Volume type to extract (Vgm, Vwm, csf)
+        
+    Returns:
+        pd.DataFrame: DataFrame with regional effect sizes
+    """
+    
+    # Get region columns from results
     region_cols = [col for col in results_df.columns if col.startswith("region_")]
     
-    # Ensure correct mapping of regions to original ROI names
-    if len(region_cols) == len(roi_names):
-        roi_mapping = {region_cols[i]: roi_names[i] for i in range(len(region_cols))}
-    else:
-        print("Mismatch between extracted ROI names and DataFrame columns! Using fallback names.")
-        roi_mapping = {region_cols[i]: f"Region_{i}" for i in range(len(region_cols))}
+    if len(roi_names) != len(region_cols):
+        print(f"Warning: Number of ROI names ({len(roi_names)}) does not match number of region columns ({len(region_cols)}). Using generic names.")
+        # Use generic names if counts don't match
+        roi_names = [f"Region_{i+1}" for i in range(len(region_cols))]
     
-    # Rename columns in results_df
-    results_df.rename(columns=roi_mapping, inplace=True)
+    # Create mapping between region columns and ROI names
+    roi_mapping = dict(zip(region_cols, roi_names))
     
-    # Get patient groups (excluding HC)
-    patient_groups = [dx for dx in results_df["Diagnosis"].unique() if dx != "HC"]
+    # Rename columns in a copy of results_df
+    named_results_df = results_df.copy()
+    named_results_df.rename(columns=roi_mapping, inplace=True)
     
-    # Function to calculate Cliff's delta
-    def cliff_delta(x, y):
-        """Calculate Cliff's delta for two samples."""
-        n1, n2 = len(x), len(y)
-        if n1 == 0 or n2 == 0:
-            return None
-        
-        greater, lesser = 0, 0
-        for i in range(n1):
-            for j in range(n2):
-                if x[i] > y[j]:
-                    greater += 1
-                elif x[i] < y[j]:
-                    lesser += 1
-        
-        return (greater - lesser) / (n1 * n2)
+    # Save the version with ROI names
+    named_results_df.to_csv(f"{save_dir}/deviation_scores_with_roi_names.csv", index=False)
     
-    results = []
+    # Get diagnoses
+    diagnoses = results_df["Diagnosis"].unique()
     
-    # Calculate effect sizes for each region and patient group
-    for group in patient_groups:
-        if sum(results_df["Diagnosis"] == group) == 0:
-            continue
-        
-        for region_col in region_cols:
-            roi_name = roi_mapping[region_col]
+    # Calculate effect sizes and create visualizations
+    effect_sizes = []
+    
+    for diagnosis in diagnoses:
+        if diagnosis == "HC":
+            continue  # Skip healthy controls
             
-            patient_data = results_df[results_df["Diagnosis"] == group][region_col].values
-            hc_data = results_df[results_df["Diagnosis"] == "HC"][region_col].values
+        # Filter data for this diagnosis
+        dx_data = results_df[results_df["Diagnosis"] == diagnosis]
+        
+        # Analyze each region
+        for i, region_col in enumerate(region_cols):
+            roi_name = roi_names[i] if i < len(roi_names) else f"Region_{i+1}"
+            region_values = dx_data[region_col].values
             
-            if len(patient_data) == 0 or len(hc_data) == 0:
+            if len(region_values) == 0:
                 continue
                 
-            delta = cliff_delta(patient_data, hc_data)
-            patient_mean = np.mean(patient_data)
-            hc_mean = np.mean(hc_data)
+            # Calculate mean, std
+            mean_val = np.mean(region_values)
+            std_val = np.std(region_values)
             
-            pooled_std = np.sqrt(((len(patient_data) - 1) * np.var(patient_data) + 
-                                 (len(hc_data) - 1) * np.var(hc_data)) / 
-                                 (len(patient_data) + len(hc_data) - 2))
-            cohens_d = (patient_mean - hc_mean) / pooled_std if pooled_std > 0 else 0
+            # Calculate effect size compared to overall deviation
+            overall_dev = dx_data["deviation_score"].values
+
+            def calculate_cliffs_delta(x, y):
+                count_greater = sum(x_i > y_i for x_i in x for y_i in y)
+                count_less = sum(x_i < y_i for x_i in x for y_i in y)
+                delta = (count_greater - count_less) / (len(x) * len(y))
+                return delta
             
-            results.append({
-                "Diagnosis": group,
+            cliff_delta = calculate_cliffs_delta(region_values, overall_dev)
+            
+            
+            cliff_delta = calculate_cliffs_delta(region_values, overall_dev)
+            
+            # Save results
+            effect_sizes.append({
+                "Diagnosis": diagnosis,
                 "Region_Column": region_col,
-                "Region_Name": roi_name,
-                "Cliff_Delta": delta,
-                "Cohens_d": cohens_d,
-                "Patient_Mean": patient_mean,
-                "HC_Mean": hc_mean,
-                "Mean_Difference": patient_mean - hc_mean
+                "ROI_Name": roi_name,
+                "Mean": mean_val,
+                "Std": std_val,
+                "Cliffs_Delta": cliff_delta
             })
     
-    effect_sizes_df = pd.DataFrame(results)
+    # Create DataFrame with effect sizes
+    effect_sizes_df = pd.DataFrame(effect_sizes)
     
-    # Save results
+    # Save effect sizes
     effect_sizes_df.to_csv(f"{save_dir}/regional_effect_sizes.csv", index=False)
     
-    # Create visualizations if data exists
-    if len(effect_sizes_df) > 0:
-        os.makedirs(f"{save_dir}/figures", exist_ok=True)
-        
-        for group in effect_sizes_df["Diagnosis"].unique():
-            group_data = effect_sizes_df[effect_sizes_df["Diagnosis"] == group].sort_values("Cliff_Delta", ascending=False)
-            top_n = min(20, len(group_data))
-            top_regions = group_data.head(top_n)
+    # Create visualization of top affected regions
+    for diagnosis in diagnoses:
+        if diagnosis == "HC":
+            continue
             
-            plt.figure(figsize=(12, 8))
-            sns.barplot(x="Cliff_Delta", y="Region_Name", data=top_regions, palette="viridis")
-            plt.title(f"Top {top_n} Brain Regions with Highest Deviation in {group} vs HC", fontsize=14)
-            plt.xlabel("Cliff's Delta")
-            plt.ylabel("Brain Region")
-            plt.tight_layout()
-            plt.savefig(f"{save_dir}/figures/top_regions_{group}_cliffs_delta.png", dpi=300)
-            plt.close()
+        # Filter data for this diagnosis
+        dx_effect_sizes = effect_sizes_df[effect_sizes_df["Diagnosis"] == diagnosis]
         
-        heatmap_data = effect_sizes_df.pivot_table(index="Region_Name", columns="Diagnosis", values="Cliff_Delta")
-        heatmap_data["max_abs"] = heatmap_data.abs().max(axis=1)
-        heatmap_data = heatmap_data.sort_values("max_abs", ascending=False).drop("max_abs", axis=1)
-        top_n_heatmap = min(30, len(heatmap_data))
-        top_heatmap_data = heatmap_data.head(top_n_heatmap)
+        if dx_effect_sizes.empty:
+            continue
+            
+        # Sort by absolute effect size
+        dx_effect_sizes["Abs_Cliffs_Delta"] = dx_effect_sizes["Cliffs_Delta"].abs()
+        dx_effect_sizes = dx_effect_sizes.sort_values("Abs_Cliffs_Delta", ascending=False)
         
-        plt.figure(figsize=(12, 14))
-        sns.heatmap(top_heatmap_data, cmap="RdBu_r", center=0, annot=True, fmt=".2f", linewidths=.5, cbar_kws={"label": "Cliff's Delta"})
-        plt.title(f"Top {top_n_heatmap} Regions by Effect Size Across Diagnostic Groups", fontsize=16)
+        # Take top 20 regions
+        top_regions = dx_effect_sizes.head(20)
+        
+        # Create bar plot
+        plt.figure(figsize=(12, 8))
+        bars = plt.barh(top_regions["ROI_Name"], top_regions["Cliffs_Delta"])
+        
+        # Color bars based on direction of effect
+        for i, bar in enumerate(bars):
+            if top_regions.iloc[i]["Cliffs_Delta"] < 0:
+                bar.set_color("blue")
+            else:
+                bar.set_color("red")
+                
+        plt.title(f"Top 20 Regions with Largest Effect Sizes - {diagnosis}")
+        plt.xlabel("Cliff's Delta")
         plt.tight_layout()
-        plt.savefig(f"{save_dir}/figures/region_effect_sizes_heatmap.png", dpi=300)
+        plt.savefig(f"{save_dir}/figures/top_regions_{diagnosis}.png", dpi=300)
         plt.close()
     
     return effect_sizes_df
