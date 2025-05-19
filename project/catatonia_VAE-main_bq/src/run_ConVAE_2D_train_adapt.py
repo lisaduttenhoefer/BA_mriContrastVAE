@@ -8,6 +8,7 @@ import argparse
 import os
 from datetime import datetime
 import logging
+#from torchviz import make_dot
 from pathlib import Path
 sys.path.append("../src")
 import torch
@@ -27,7 +28,7 @@ matplotlib.use("Agg")
 sys.path.append("../src")
 
 from models.ContrastVAE_2D_f import ContrastVAE_2D
-from utils.support_f import get_all_data, split_df, combine_dfs
+from utils.support_f import get_all_data, split_df_adapt, combine_dfs
 from utils.config_utils_model import Config_2D
 
 from module.data_processing_hc import (
@@ -65,14 +66,16 @@ matplotlib.use("Agg")
 
 def create_arg_parser():
     parser = argparse.ArgumentParser(description='Arguments for Normative Modeling Training')
-    parser.add_argument('--atlas_name', help='Name of the desired atlas for training.')
+    parser.add_argument('--atlas_name', help='Name of the desired atlas for training.', type=str, default="all")
     parser.add_argument('--num_epochs', help='Number of epochs to be trained for', type=int, default=100)
     parser.add_argument('--n_bootstraps', help='Number of bootstrap samples', type=int, default=50)
+    parser.add_argument('--norm_diagnosis', help='which diagnosis is considered the "norm"', type=str, default="SCHZ")
+    parser.add_argument('--train_ratio', help='Normpslit ratio', type=float, default=0.7)
     parser.add_argument('--batch_size', help='Batch size', type=int, default=32)
     parser.add_argument('--learning_rate', help='Learning rate', type=float, default=0.000559) #vor tuning: 4e-5
     parser.add_argument('--latent_dim', help='Dimension of latent space', type=int, default=128) #macht sinn???
     parser.add_argument('--kldiv_weight', help='Weight for KL divergence loss', type=float, default=1.4656)  #vor tuning:4.0
-    parser.add_argument('--save_models', help='Save all bootstrap models', action='store_true')
+    parser.add_argument('--save_models', help='Save all bootstrap models', action='store_true', default=True)
     parser.add_argument('--no_cuda', help='Disable CUDA (use CPU only)', action='store_true')
     parser.add_argument('--seed', help='Random seed for reproducibility', type=int, default=42)
     parser.add_argument('--output_dir', help='Override default output directory', default=None)
@@ -85,18 +88,18 @@ def extract_measurements(subjects):
         all_measurements.append(torch.tensor(subject["measurements"]).squeeze())
     return torch.stack(all_measurements)
 
-def main(atlas_name: str, num_epochs: int, n_bootstraps: int, batch_size: int, learning_rate: float, 
+def main(atlas_name: str, num_epochs: int, n_bootstraps: int,norm_diagnosis: str, train_ratio: float, batch_size: int, learning_rate: float, 
          latent_dim: int, kldiv_weight: float, save_models: bool, no_cuda: bool, seed: int, output_dir: str = None):
     ## 0. Set Up ----------------------------------------------------------
     # Set main paths
     path_original = "/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/metadata_20250110/full_data_train_valid_test.csv"
     path_to_dir = "/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data_training"
-    TRAIN_CSV, TEST_CSV = split_df(path_original, path_to_dir)
+    TRAIN_CSV, TEST_CSV = split_df_adapt(path_original, path_to_dir,norm_diagnosis,train_ratio,seed)
     
     # Create output directory
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     if output_dir is None:
-        save_dir = f"/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/analysis/TRAINIG/normative_results_{timestamp}"
+        save_dir = f"/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/analysis/TRAINIG/normative_results_{timestamp}{norm_diagnosis}"
     else:
         save_dir = output_dir
         
@@ -112,12 +115,13 @@ def main(atlas_name: str, num_epochs: int, n_bootstraps: int, batch_size: int, l
 
     config = Config_2D(
         # General Parameters
-        RUN_NAME=f"NormativeVAE_{atlas_name}_{timestamp}",
+        RUN_NAME=f"NormativeVAE_{atlas_name}_{timestamp}_{norm_diagnosis}",
         # Input / Output Paths
-        TRAIN_CSV=["/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data_training/training_metadata.csv"],
-        TEST_CSV=["/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data_training/testing_metadata.csv"],
-        MRI_DATA_PATH_TRAIN="/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data/train_xml_data",
-        MRI_DATA_PATH_TEST="/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data/test_xml_data",
+        TRAIN_CSV=[TRAIN_CSV],
+        TEST_CSV=[TEST_CSV],
+        # TRAIN_CSV=["/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data_training/training_metadata.csv"],
+        # TEST_CSV=["/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data_training/testing_metadata.csv"],
+        MRI_DATA_PATH="/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data/all_xml_data",
         ATLAS_NAME=atlas_name,
         PROC_DATA_PATH="/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data_training/proc_extracted_xml_data",
         OUTPUT_DIR=save_dir,
@@ -150,7 +154,7 @@ def main(atlas_name: str, num_epochs: int, n_bootstraps: int, batch_size: int, l
         METRICS_ROLLING_WINDOW=10,
         # Data Parameters
         BATCH_SIZE=batch_size,
-        DIAGNOSES=["HC"],  # For normative modeling, we train on healthy controls
+        DIAGNOSES=norm_diagnosis,  
         # Misc.
         LATENT_DIM=latent_dim,
         SHUFFLE_DATA=True,
@@ -184,13 +188,13 @@ def main(atlas_name: str, num_epochs: int, n_bootstraps: int, batch_size: int, l
 
     ## 1. Load Data --------------------------------
     # Load healthy control data
-    log_and_print("Loading healthy control data...")
+    log_and_print("Loading NORM control data...")
     if config.ATLAS_NAME != "all":
-        subjects_hc, annotations_hc = load_mri_data_2D(
+        subjects_norm, annotations_norm, roi_names = load_mri_data_2D(
             csv_paths=config.TRAIN_CSV,
-            data_path=config.MRI_DATA_PATH_TRAIN,
+            data_path=config.MRI_DATA_PATH,
             atlas_name=config.ATLAS_NAME,
-            diagnoses=["HC"],  # Only healthy controls for normative model
+            diagnoses=norm_diagnosis,  # Only norm controls for normative model
             hdf5=True,
             train_or_test="train",
             save=True,
@@ -198,38 +202,54 @@ def main(atlas_name: str, num_epochs: int, n_bootstraps: int, batch_size: int, l
             valid_volume_types=config.VALID_VOLUME_TYPES,
         )
     else:
-        all_data_paths_train = get_all_data(directory=config.MRI_DATA_PATH_TRAIN, ext="h5")
+        all_data_paths_train = get_all_data(directory=config.MRI_DATA_PATH, ext="h5")
 
         # We assume there's a function load_mri_data_2D_all_atlases similar to the one in your original code
-        subjects_hc, annotations_hc = load_mri_data_2D_all_atlases(
+        subjects_norm, annotations_norm, roi_names = load_mri_data_2D_all_atlases(
             csv_paths=config.TRAIN_CSV,
             data_paths=all_data_paths_train,
-            diagnoses=config.DIAGNOSES,
+            diagnoses=norm_diagnosis,
             hdf5=True,
             train_or_test="train",
             volume_type=config.VOLUME_TYPE,
             valid_volume_types=config.VALID_VOLUME_TYPES,
         )
 
-    len_atlas = len(subjects_hc[0]["measurements"])
+    log_and_print("First few rows of annotations_norm:")
+    log_and_print(annotations_norm.head())
+    log_and_print("Value counts of Diagnosis in annotations_norm:")
+    log_and_print(annotations_norm['Diagnosis'].value_counts())
+    log_and_print(f"size annotations: {len(annotations_norm)}")
+    #obs an subject_norm liegt
+    log_and_print("First few rows of subjects_norm:")
+    log_and_print(subjects_norm[:10])
+    log_and_print(f"size annotations: {len(subjects_norm)}")
+    print(len(subjects_norm[0]["name"]))
+    
+
+    len_atlas = len(subjects_norm[0]["measurements"])
     log_and_print(f"Number of ROIs in atlas: {len_atlas}")
 
-    # Split healthy controls into train and validation
-    train_annotations_hc, valid_annotations_hc = train_val_split_annotations(
-        annotations=annotations_hc, 
-        diagnoses=["HC"]
+    # Split norm controls into train and validation
+    train_annotations_norm, valid_annotations_norm = train_val_split_annotations(
+        annotations=annotations_norm, 
+        diagnoses=norm_diagnosis
     )
     
-    train_subjects_hc, valid_subjects_hc = train_val_split_subjects(
-        subjects=subjects_hc, 
-        train_ann=train_annotations_hc, 
-        val_ann=valid_annotations_hc
+    train_subjects_norm, valid_subjects_norm = train_val_split_subjects(
+        subjects=subjects_norm, 
+        train_ann=train_annotations_norm, 
+        val_ann=valid_annotations_norm
     )
+    log_and_print(f"Number of training annotations (norm): {len(train_annotations_norm)}")
+    log_and_print(f"Number of validation annotations (norm): {len(valid_annotations_norm)}")
+    log_and_print(f"Number of training subjects (norm): {len(train_subjects_norm)}")
+    log_and_print(f"Number of validation subjects (norm): {len(valid_subjects_norm)}")
 
-    train_annotations_hc.insert(1, "Data_Type", "train")
-    valid_annotations_hc.insert(1, "Data_Type", "valid")
+    train_annotations_norm.insert(1, "Data_Type", "train")
+    valid_annotations_norm.insert(1, "Data_Type", "valid")
 
-    annotations = pd.concat([train_annotations_hc, valid_annotations_hc])
+    annotations = pd.concat([train_annotations_norm, valid_annotations_norm])
     annotations.sort_values(by=["Data_Type", "Filename"], inplace=True)
     annotations.reset_index(drop=True, inplace=True)
 
@@ -250,14 +270,14 @@ def main(atlas_name: str, num_epochs: int, n_bootstraps: int, batch_size: int, l
 
 
     # Prepare data loaders
-    train_loader_hc = process_subjects(
-        subjects=train_subjects_hc,
+    train_loader_norm = process_subjects(
+        subjects=train_subjects_norm,
         batch_size=config.BATCH_SIZE,
         shuffle_data=config.SHUFFLE_DATA,
     )
 
-    valid_loader_hc = process_subjects(
-        subjects=valid_subjects_hc,
+    valid_loader_norm = process_subjects(
+        subjects=valid_subjects_norm,
         batch_size=config.BATCH_SIZE,
         shuffle_data=False,
     )
@@ -268,8 +288,8 @@ def main(atlas_name: str, num_epochs: int, n_bootstraps: int, batch_size: int, l
     # Log data setup
     log_data_loading(
         datasets={
-            "Training Data (HC)": len(train_subjects_hc),
-            "Validation Data (HC)": len(valid_subjects_hc),
+            "Training Data": len(train_subjects_norm),
+            "Validation Data": len(valid_subjects_norm),
         }
     )
     
@@ -278,8 +298,8 @@ def main(atlas_name: str, num_epochs: int, n_bootstraps: int, batch_size: int, l
     log_model_setup()
     
     # Extract features as torch tensors
-    train_data = extract_measurements(train_subjects_hc)
-    valid_data = extract_measurements(valid_subjects_hc)
+    train_data = extract_measurements(train_subjects_norm)
+    valid_data = extract_measurements(valid_subjects_norm)
     
     log_and_print(f"Training data shape: {train_data.shape}")
     log_and_print(f"Validation data shape: {valid_data.shape}")
@@ -303,17 +323,16 @@ def main(atlas_name: str, num_epochs: int, n_bootstraps: int, batch_size: int, l
     
     log_model_ready(normative_model)
       
-    # Save initial model architecture visualization
-    try:
-        from torchviz import make_dot
-        sample_input = train_data[:1].to(device)
-        output, mu, log_var = normative_model(sample_input)
-        dot = make_dot(output, params=dict(normative_model.named_parameters()))
-        dot.format = 'png'
-        dot.render(f"{save_dir}/figures/model_architecture")
-        log_and_print(f"Model architecture visualization saved to {save_dir}/figures/model_architecture.png")
-    except ImportError:
-        log_and_print("torchviz not available, skipping model architecture visualization")
+    # # Save initial model architecture visualization
+    # try:
+    #     sample_input = train_data[:1].to(device)
+    #     output, mu, log_var = normative_model(sample_input)
+    #     dot = make_dot(output, params=dict(normative_model.named_parameters()))
+    #     dot.format = 'png'
+    #     dot.render(f"{save_dir}/figures/model_architecture")
+    #     log_and_print(f"Model architecture visualization saved to {save_dir}/figures/model_architecture.png")
+    # except ImportError:
+    #     log_and_print("torchviz not available, skipping model architecture visualization")
     
     # Before bootstrap training, train and evaluate a single baseline model for reference
     log_and_print("Training baseline model before bootstrap training...")
@@ -373,8 +392,8 @@ def main(atlas_name: str, num_epochs: int, n_bootstraps: int, batch_size: int, l
         "hidden_dim_1": hidden_dim_1,
         "hidden_dim_2": hidden_dim_2,
         "input_dim": len_atlas,
-        "train_samples": len(train_subjects_hc),
-        "valid_samples": len(valid_subjects_hc),
+        "train_samples": len(train_subjects_norm),
+        "valid_samples": len(valid_subjects_norm),
         "best_model_val_loss": baseline_history['best_val_loss'],
         "best_model_epoch": baseline_history['best_epoch'],
         "bootstrap_mean_val_loss": metrics_df['final_val_loss'].mean(),
@@ -398,6 +417,8 @@ if __name__ == "__main__":
     save_dir, bootstrap_models, bootstrap_metrics = main(
         atlas_name=args.atlas_name,
         num_epochs=args.num_epochs,
+        norm_diagnosis=args.norm_diagnosis,
+        train_ratio=args.train_ratio,
         n_bootstraps=args.n_bootstraps,
         batch_size=args.batch_size,
         learning_rate=args.learning_rate,
@@ -411,3 +432,5 @@ if __name__ == "__main__":
     
     # Final log message
     print(f"Normative modeling complete. Results saved to {save_dir}")
+
+

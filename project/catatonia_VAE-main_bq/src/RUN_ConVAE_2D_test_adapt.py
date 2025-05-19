@@ -4,7 +4,6 @@ import sys
 from pathlib import Path
 import logging
 from datetime import datetime
-
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -12,7 +11,6 @@ import seaborn as sns
 import torch
 from torch.utils.data import DataLoader, TensorDataset
 from scipy import stats
-
 import umap
 
 # Ensure we can import from parent directory
@@ -35,9 +33,9 @@ from utils.dev_scores_utils import (
 )
 
 #--------------------------------------- NECESSARY ARGUMENTS -----------------------------------------------------
-model_dir = "/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/analysis/TRAINIG/normative_results_20250519_082729SCHZ" #dir of trained models
-clinical_data_path = "/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data/test_xml_data" #dir to clinical data
-clinical_csv = "/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data_training/test_metadataSCHZ_0.7.csv" #path to clinical csv with annotations
+model_dir = "/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/analysis/TRAINIG/normative_results_20250519_082729SCHZ" #dir of trained models (has to match NORM & RATIO)
+clinical_data_path = "/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data/all_xml_data" #dir to clinical data -> ALL
+clinical_csv = "/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data_training/testing_metadata.csv" #path to metadata (has to match NORM & RATIO)
 #-----------------------------------------------------------------------------------------------------------------
 def extract_measurements(subjects):
     """Extract measurements from subjects as torch tensors."""
@@ -45,7 +43,6 @@ def extract_measurements(subjects):
     for subject in subjects:
         all_measurements.append(torch.tensor(subject["measurements"]).squeeze())
     return torch.stack(all_measurements)
-
 
 
 def main(args):
@@ -292,7 +289,7 @@ if __name__ == "__main__":
     # parser.add_argument("--clinical_data_path", required=True, help="Path to clinical data")
     # parser.add_argument("--clinical_csv", required=True, help="Path to clinical CSV file")
     parser.add_argument("--norm_diagnosis", type=str, default="HC")
-    parser.add_argument("--atlas_name", help="Atlas name (if not available in config)", default="all")
+    parser.add_argument("--atlas_name", help="Atlas name (if not available in config)")
     parser.add_argument("--latent_dim", type=int, default=20, help="Latent dimension (if not available in config)")
     parser.add_argument("--max_models", type=int, default=0, help="Maximum number of models to use (0 = all)")
     parser.add_argument("--output_dir", default=None, help="Output directory for results")

@@ -196,7 +196,7 @@ def plot_deviation_distributions(results_df, save_dir):
     plt.savefig(f"{save_dir}/figures/distributions/metrics_violin_plots.png", dpi=300)
     plt.close()
 
-    selected_diagnoses = ["SCHZ", "CTT", "MDD"]
+    selected_diagnoses = ["SCHZ", "CTT", "MDD","HC"]
 
     # Berechne Mittelwert, Standardabweichung und n für alle drei Metriken
     metrics = ["reconstruction_error", "kl_divergence", "deviation_score"]
@@ -311,7 +311,7 @@ def visualize_embeddings(normative_models, data_tensor, annotations_df, device="
     return plt.gcf(), plot_df
 
 
-def extract_roi_names(h5_file_path, volume_type="Vgm"):
+def extract_roi_names(h5_file_path, volume_type):
     """
     Extract ROI names from HDF5 file.
     
@@ -379,7 +379,7 @@ def extract_roi_names(h5_file_path, volume_type="Vgm"):
     
     return roi_names
 
-def analyze_regional_deviations(results_df, save_dir, clinical_data_path, volume_type, atlas_name, roi_names):
+def analyze_regional_deviations(results_df, save_dir, clinical_data_path, volume_type, atlas_name, roi_names, norm_diagnosis):
     """
     Analyze regional deviations using ROI names extracted from HDF5 file.
     
@@ -413,62 +413,95 @@ def analyze_regional_deviations(results_df, save_dir, clinical_data_path, volume
     
     # Get diagnoses
     diagnoses = results_df["Diagnosis"].unique()
+
+    # Get normative group data
+    norm_data = results_df[results_df["Diagnosis"] == norm_diagnosis]
+    
+    
+    if len(norm_data) == 0:
+        print(f"Warning: No data found for normative diagnosis '{norm_diagnosis}'. Cannot calculate comparisons.")
+        return pd.DataFrame()  # Return empty DataFrame
+    
+    # Function to calculate Cliff's Delta
+    def calculate_cliffs_delta(x, y):
+        count_greater = sum(x_i > y_i for x_i in x for y_i in y)
+        count_less = sum(x_i < y_i for x_i in x for y_i in y)
+        delta = (count_greater - count_less) / (len(x) * len(y))
+        return delta
     
     # Calculate effect sizes and create visualizations
     effect_sizes = []
     
     for diagnosis in diagnoses:
-        if diagnosis == "HC":
-            continue  # Skip healthy controls
+        if diagnosis == norm_diagnosis:
+            continue  # Skip normative group as we use it for comparison
             
         # Filter data for this diagnosis
         dx_data = results_df[results_df["Diagnosis"] == diagnosis]
         
+        if len(dx_data) == 0:
+            print(f"No data found for diagnosis: {diagnosis}")
+            continue
+        
+        print(f"Analyzing diagnosis: {diagnosis} (n={len(dx_data)}) vs {norm_diagnosis} (n={len(norm_data)})")
+        
         # Analyze each region
         for i, region_col in enumerate(region_cols):
             roi_name = roi_names[i] if i < len(roi_names) else f"Region_{i+1}"
-            region_values = dx_data[region_col].values
             
-            if len(region_values) == 0:
+            # Get region values for both groups
+            dx_region_values = dx_data[region_col].values
+            norm_region_values = norm_data[region_col].values
+            
+            if len(dx_region_values) == 0 or len(norm_region_values) == 0:
                 continue
                 
-            # Calculate mean, std
-            mean_val = np.mean(region_values)
-            std_val = np.std(region_values)
+            # Calculate statistics for each group
+            dx_mean = np.mean(dx_region_values)
+            dx_std = np.std(dx_region_values)
+            norm_mean = np.mean(norm_region_values)
+            norm_std = np.std(norm_region_values)
             
-            # Calculate effect size compared to overall deviation
-            overall_dev = dx_data["deviation_score"].values
-
-            def calculate_cliffs_delta(x, y):
-                count_greater = sum(x_i > y_i for x_i in x for y_i in y)
-                count_less = sum(x_i < y_i for x_i in x for y_i in y)
-                delta = (count_greater - count_less) / (len(x) * len(y))
-                return delta
+            # Calculate difference
+            mean_diff = dx_mean - norm_mean
             
-            cliff_delta = calculate_cliffs_delta(region_values, overall_dev)
+            # Calculate Cliff's Delta between this diagnosis and normative group for this region
+            cliff_delta = calculate_cliffs_delta(dx_region_values, norm_region_values)
             
+            # Calculate Cohen's d effect size
+            pooled_std = np.sqrt(((len(dx_region_values) - 1) * dx_std**2 + 
+                                  (len(norm_region_values) - 1) * norm_std**2) / 
+                                 (len(dx_region_values) + len(norm_region_values) - 2))
             
-            cliff_delta = calculate_cliffs_delta(region_values, overall_dev)
+            if pooled_std == 0:  # Avoid division by zero
+                cohens_d = 0
+            else:
+                cohens_d = mean_diff / pooled_std
             
             # Save results
             effect_sizes.append({
                 "Diagnosis": diagnosis,
+                "Vs_Norm_Diagnosis": norm_diagnosis,
                 "Region_Column": region_col,
                 "ROI_Name": roi_name,
-                "Mean": mean_val,
-                "Std": std_val,
-                "Cliffs_Delta": cliff_delta
+                "Diagnosis_Mean": dx_mean,
+                "Diagnosis_Std": dx_std,
+                "Norm_Mean": norm_mean,
+                "Norm_Std": norm_std,
+                "Mean_Difference": mean_diff,
+                "Cliffs_Delta": cliff_delta,
+                "Cohens_d": cohens_d
             })
     
     # Create DataFrame with effect sizes
     effect_sizes_df = pd.DataFrame(effect_sizes)
     
-    # Save effect sizes
-    effect_sizes_df.to_csv(f"{save_dir}/regional_effect_sizes.csv", index=False)
+    # Save complete effect sizes
+    effect_sizes_df.to_csv(f"{save_dir}/regional_effect_sizes_vs_{norm_diagnosis}.csv", index=False)
     
-    # Create visualization of top affected regions
+    # Create visualization of top affected regions for each diagnosis
     for diagnosis in diagnoses:
-        if diagnosis == "HC":
+        if diagnosis == norm_diagnosis:
             continue
             
         # Filter data for this diagnosis
@@ -477,15 +510,15 @@ def analyze_regional_deviations(results_df, save_dir, clinical_data_path, volume
         if dx_effect_sizes.empty:
             continue
             
-        # Sort by absolute effect size
+        # Sort by absolute effect size (Cliff's Delta)
         dx_effect_sizes["Abs_Cliffs_Delta"] = dx_effect_sizes["Cliffs_Delta"].abs()
-        dx_effect_sizes = dx_effect_sizes.sort_values("Abs_Cliffs_Delta", ascending=False)
+        dx_effect_sizes_sorted = dx_effect_sizes.sort_values("Abs_Cliffs_Delta", ascending=False)
         
         # Take top 20 regions
-        top_regions = dx_effect_sizes.head(20)
+        top_regions = dx_effect_sizes_sorted.head(20)
         
-        # Create bar plot
-        plt.figure(figsize=(12, 8))
+        # Create bar plot for Cliff's Delta
+        plt.figure(figsize=(14, 10))
         bars = plt.barh(top_regions["ROI_Name"], top_regions["Cliffs_Delta"])
         
         # Color bars based on direction of effect
@@ -494,11 +527,89 @@ def analyze_regional_deviations(results_df, save_dir, clinical_data_path, volume
                 bar.set_color("blue")
             else:
                 bar.set_color("red")
-                
-        plt.title(f"Top 20 Regions with Largest Effect Sizes - {diagnosis}")
+        
+        plt.axvline(x=0, color="black", linestyle="--", alpha=0.7)
+        plt.title(f"Top 20 Regions with Largest Effect Sizes - {diagnosis} vs {norm_diagnosis}")
         plt.xlabel("Cliff's Delta")
         plt.tight_layout()
-        plt.savefig(f"{save_dir}/figures/top_regions_{diagnosis}.png", dpi=300)
+        plt.savefig(f"{save_dir}/figures/top_regions_cliffs_delta_{diagnosis}_vs_{norm_diagnosis}.png", dpi=300)
         plt.close()
+        
+        # Create bar plot for Cohen's d
+        plt.figure(figsize=(14, 10))
+        bars = plt.barh(top_regions["ROI_Name"], top_regions["Cohens_d"])
+        
+        # Color bars based on direction of effect
+        for i, bar in enumerate(bars):
+            if top_regions.iloc[i]["Cohens_d"] < 0:
+                bar.set_color("blue")
+            else:
+                bar.set_color("red")
+                
+        plt.axvline(x=0, color="black", linestyle="--", alpha=0.7)
+        plt.title(f"Top 20 Regions with Largest Effect Sizes - {diagnosis} vs {norm_diagnosis}")
+        plt.xlabel("Cohen's d")
+        plt.tight_layout()
+        plt.savefig(f"{save_dir}/figures/top_regions_cohens_d_{diagnosis}_vs_{norm_diagnosis}.png", dpi=300)
+        plt.close()
+        
+        # Also save the top regions data
+        top_regions.to_csv(f"{save_dir}/top20_regions_{diagnosis}_vs_{norm_diagnosis}.csv", index=False)
+    
+    # Create a summary visualization showing the overall distribution of effects
+    plt.figure(figsize=(10, 6))
+    for diagnosis in diagnoses:
+        if diagnosis == norm_diagnosis:
+            continue
+        
+        dx_effect_sizes = effect_sizes_df[effect_sizes_df["Diagnosis"] == diagnosis]
+        if not dx_effect_sizes.empty:
+            sns.kdeplot(dx_effect_sizes["Cliffs_Delta"], label=diagnosis)
+    
+    plt.axvline(x=0, color="black", linestyle="--", alpha=0.7)
+    plt.title(f"Distribution of Regional Effect Sizes vs {norm_diagnosis}")
+    plt.xlabel("Cliff's Delta")
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(f"{save_dir}/figures/effect_size_distributions_vs_{norm_diagnosis}.png", dpi=300)
+    plt.close()
+    
+    # Create heatmap of top regions across diagnoses
+    # Get top 30 regions overall by average absolute effect size
+    region_avg_effects = effect_sizes_df.groupby("ROI_Name")["Abs_Cliffs_Delta"].mean().reset_index()
+    top_regions_overall = region_avg_effects.sort_values("Abs_Cliffs_Delta", ascending=False).head(30)["ROI_Name"].values
+    
+    # Create matrix of effect sizes for these regions
+    heatmap_data = []
+    for region in top_regions_overall:
+        row = {"ROI_Name": region}
+        for diagnosis in diagnoses:
+            if diagnosis == norm_diagnosis:
+                continue
+            
+            region_data = effect_sizes_df[(effect_sizes_df["ROI_Name"] == region) & 
+                                         (effect_sizes_df["Diagnosis"] == diagnosis)]
+            if not region_data.empty:
+                row[diagnosis] = region_data.iloc[0]["Cliffs_Delta"]
+            else:
+                row[diagnosis] = np.nan
+        
+        heatmap_data.append(row)
+    
+    heatmap_df = pd.DataFrame(heatmap_data)
+    heatmap_df.set_index("ROI_Name", inplace=True)
+    
+    # Plot heatmap if we have more than one diagnosis to compare
+    if len(diagnoses) > 1 and len(heatmap_df.columns) > 0:
+        plt.figure(figsize=(12, 14))
+        sns.heatmap(heatmap_df, cmap="RdBu_r", center=0, annot=True, fmt=".2f", 
+                   cbar_kws={"label": "Cliff's Delta"})
+        plt.title(f"Top 30 Regions Effect Sizes vs {norm_diagnosis}")
+        plt.tight_layout()
+        plt.savefig(f"{save_dir}/figures/region_effect_heatmap_vs_{norm_diagnosis}.png", dpi=300)
+        plt.close()
+        
+        # Save heatmap data
+        heatmap_df.to_csv(f"{save_dir}/top_regions_heatmap_data_vs_{norm_diagnosis}.csv")
     
     return effect_sizes_df

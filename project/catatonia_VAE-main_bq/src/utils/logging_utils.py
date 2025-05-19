@@ -68,7 +68,7 @@ def setup_logging(config: Config_2D):
     print(f"Queued Epochs:       {config.TOTAL_EPOCHS}")
     print(f"Batch Size:          {config.BATCH_SIZE}")
     print(f"Data Summary:        {config.TRAIN_CSV}")
-    print(f"MRI Data Directory:  {config.MRI_DATA_PATH_TRAIN}") #sagt jetzt immer train auch wenn eig test 
+    print(f"MRI Data Directory:  {config.MRI_DATA_PATH}") #sagt jetzt immer train auch wenn eig test 
     print(f"Loading Model:       {config.LOAD_MODEL}")
     print(f"Output Directory:    {config.OUTPUT_DIR}")
     print("")
@@ -261,7 +261,7 @@ def log_early_stopping(
 
 
 def end_logging(config: Config_2D):
-    end_messsage = f"Training session completed at {datetime.now()+timedelta(hours=2)}."
+    end_messsage = f"session completed at {datetime.now()+timedelta(hours=2)}."
 
     logging.info(end_messsage)
     logging.info(f"Configuration:")

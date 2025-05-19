@@ -9,28 +9,87 @@ import torch
 Config class to set up all parameters for model preparation and training. Is used with the run_ModelXYZ.py scripts.
 '''
 
-# Get the GPU with the most memory capacity
 def get_free_gpu() -> torch.device:
-
+    """
+    Get the GPU with the most available memory, with improved error handling.
+    Falls back to CPU if no GPU is available or if there's an error accessing the GPUs.
+    
+    Returns:s
+        torch.device: Device with the most free memory
+    """
     # check if cuda is available
-    if torch.cuda.is_available():
-        # run nvidia-smi command to get data on free memory
-        command = "nvidia-smi --query-gpu=memory.free --format=csv"
-        memory_free_info = (
-            sp.check_output(command.split()).decode("ascii").split("\n")[:-1][1:]
-        )
-        # extract memory values
-        memory_free_values = [int(x.split()[0]) for i, x in enumerate(memory_free_info)]
+    if not torch.cuda.is_available():
+        print("CUDA is not available. Using CPU instead.")
+        return torch.device("cpu")
+    
+    try:
+        # Get the number of GPUs available
+        num_gpus = torch.cuda.device_count()
+        
+        if num_gpus == 0:
+            print("No CUDA devices found despite CUDA being available. Using CPU instead.")
+            return torch.device("cpu")
+        
+        # If there's only one GPU, use it without further checks
+        if num_gpus == 1:
+            print(f"Only one CUDA device found. Using cuda:0")
+            return torch.device("cuda:0")
+        
+        # Try to run nvidia-smi command to get memory info
+        try:
+            import subprocess as sp
+            command = "nvidia-smi --query-gpu=memory.free --format=csv"
+            memory_free_info = (
+                sp.check_output(command.split()).decode("ascii").split("\n")[:-1][1:]
+            )
+            
+            # extract memory values
+            memory_free_values = [int(x.split()[0]) for i, x in enumerate(memory_free_info)]
+            
+            # Check if we have memory data for all GPUs
+            if len(memory_free_values) != num_gpus:
+                print(f"Warning: nvidia-smi reported {len(memory_free_values)} GPUs, but torch.cuda sees {num_gpus}.")
+                print(f"Using the first available GPU (cuda:0) to be safe.")
+                return torch.device("cuda:0")
+                
+            # Get the GPU with the most free memory
+            gpu_idx = memory_free_values.index(max(memory_free_values))
+            print(f"Selected GPU {gpu_idx} with {memory_free_values[gpu_idx]} MB free memory")
+            return torch.device(f"cuda:{gpu_idx}")
+            
+        except (sp.SubprocessError, ValueError, IndexError) as e:
+            print(f"Error getting GPU memory info: {e}")
+            print(f"Falling back to first available GPU (cuda:0)")
+            return torch.device("cuda:0")
+            
+    except Exception as e:
+        print(f"Unexpected error selecting GPU: {e}")
+        print("Falling back to CPU")
+        return torch.device("cpu")
+    
+# # Get the GPU with the most memory capacity
+# def get_free_gpu() -> torch.device:
 
-        # return gpu with the most free memory
-        gpu = f"cuda:{memory_free_values.index(max(memory_free_values))}"
+#     # check if cuda is available
+#     if torch.cuda.is_available():
+#         # run nvidia-smi command to get data on free memory
+#         command = "nvidia-smi --query-gpu=memory.free --format=csv"
+#         memory_free_info = (
+#             sp.check_output(command.split()).decode("ascii").split("\n")[:-1][1:]
+#         )
+#         # extract memory values
+#         memory_free_values = [int(x.split()[0]) for i, x in enumerate(memory_free_info)]
 
-    # if cuda isn't available, run on cpu
-    else:
-        gpu = "cpu"
+#         # return gpu with the most free memory
+#         gpu = f"cuda:{memory_free_values.index(max(memory_free_values))}"
 
-    # return the device with the most free memory
-    return torch.device(gpu)
+#     # if cuda isn't available, run on cpu
+#     else:
+#         gpu = "cpu"
+
+#     # return the device with the most free memory
+#     return torch.device(gpu)
+
 
 
 # Set up all parameters for model preparation and training
@@ -65,9 +124,9 @@ class Config_2D:
         # The path to the folder where intermediate normalitzed and scaled data should be saved
         PROC_DATA_PATH: str,
         # The path to the directory that contains the MRI .nii files
-        #MRI_DATA_PATH: str, ####
-        MRI_DATA_PATH_TRAIN: str,
-        MRI_DATA_PATH_TEST: str,
+        MRI_DATA_PATH: str,
+        # MRI_DATA_PATH_TRAIN: str,
+        # MRI_DATA_PATH_TEST: str,
         # The folder in which a training specific output directory should be created
         OUTPUT_DIR: str,
         # The column names, from the CSVs, that contain the covariates that you want to be attached to the Subject objects
@@ -219,7 +278,8 @@ class Config_2D:
         self.FINAL_EPOCH = self.START_EPOCH + self.TOTAL_EPOCHS
 
         # check that all other paths exist
-        for path in [ADVER_CSV, MRI_DATA_PATH_TRAIN, MRI_DATA_PATH_TEST, OUTPUT_DIR]:
+        # for path in [ADVER_CSV, MRI_DATA_PATH_TRAIN, MRI_DATA_PATH_TEST, OUTPUT_DIR]:
+        for path in [ADVER_CSV, MRI_DATA_PATH, OUTPUT_DIR]:
             if path is not None:
                 assert os.path.exists(path), f"Path {path} does not exist"
 
@@ -227,8 +287,9 @@ class Config_2D:
         self.OUTPUT_DIR = OUTPUT_DIR
         self.TRAIN_CSV = TRAIN_CSV
         self.ADVER_CSV = ADVER_CSV
-        self.MRI_DATA_PATH_TRAIN = MRI_DATA_PATH_TRAIN
-        self.MRI_DATA_PATH_TEST = MRI_DATA_PATH_TEST
+        self.MRI_DATA_PATH = MRI_DATA_PATH
+        # self.MRI_DATA_PATH_TRAIN = MRI_DATA_PATH_TRAIN
+        # self.MRI_DATA_PATH_TEST = MRI_DATA_PATH_TEST
         self.PROC_DATA_PATH = PROC_DATA_PATH
         self.ATLAS_NAME = ATLAS_NAME
         self.TEST_CSV = TEST_CSV

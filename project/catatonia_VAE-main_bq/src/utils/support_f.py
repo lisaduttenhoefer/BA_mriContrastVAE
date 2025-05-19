@@ -131,6 +131,63 @@ def split_df(path_original: str, path_to_dir: str):
     return path_hc, path_non_hc
 
 
-
+def split_df_adapt(path_original: str, path_to_dir: str, norm_diagnosis: str = "HC", train_ratio: float = 0.7, random_seed: int = 42):
+    """
+    Args:
+        path_original: Pfad zur ursprünglichen CSV-Datei
+        path_to_dir: Zielverzeichnis für die erzeugten CSV-Dateien
+        norm_diagnosis: Die Diagnose, die als "NORM" behandelt werden soll (default: "HC")
+        train_ratio: Anteil der NORM-Diagnose für das Training (default: 0.7)
+        random_seed: Seed für die zufällige Auswahl (für Reproduzierbarkeit)
+    
+    Returns:
+        Tuple mit den Pfaden der erzeugten CSV-Dateien (train, test)
+    """
+    # Überprüfe, ob das Zielverzeichnis existiert, sonst erstelle es
+    if not os.path.exists(path_to_dir):
+        os.makedirs(path_to_dir)
+    
+    # Lade die ursprüngliche CSV-Datei
+    df = pd.read_csv(path_original)
+    
+    # Entferne die unnötige Spalte, falls vorhanden
+    if "Unnamed: 0" in df.columns:
+        df = df.drop(columns=["Unnamed: 0"])
+    
+    # Setze den zufälligen Seed für Reproduzierbarkeit
+    np.random.seed(random_seed)
+    
+    # Filtere die Daten für die NORM-Diagnose
+    norm_data = df[df["Diagnosis"] == norm_diagnosis].copy()
+    other_data = df[df["Diagnosis"] != norm_diagnosis].copy()
+    
+    # Zufällige Auswahl für das Trainingsset
+    num_train = int(len(norm_data) * train_ratio)
+    
+    # Zufällige Indizes auswählen
+    all_indices = np.array(norm_data.index)
+    np.random.shuffle(all_indices)
+    train_indices = all_indices[:num_train]
+    test_indices = all_indices[num_train:]
+    
+    # Erstelle die Trainings- und Testdatensätze
+    train_norm = norm_data.loc[train_indices]
+    test_norm = norm_data.loc[test_indices]
+    
+    # Kombiniere die Testdaten mit anderen Diagnosen
+    test_data = pd.concat([test_norm, other_data])
+    
+    # Definiere die Ausgabepfade
+    path_train = f"{path_to_dir}/train_metadata{norm_diagnosis}_{train_ratio}.csv"
+    path_test = f"{path_to_dir}/test_metadata{norm_diagnosis}_{train_ratio}.csv"
+    
+    # Speichere die Datensätze
+    train_norm.to_csv(path_train, index=False)
+    test_data.to_csv(path_test, index=False)
+    
+    print(f"Training set erstellt: {path_train} ({len(train_norm)} Patienten)")
+    print(f"Test set erstellt: {path_test} ({len(test_data)} Patienten, davon {len(test_norm)} {norm_diagnosis} und {len(other_data)} andere)")
+    
+    return path_train, path_test
 
     

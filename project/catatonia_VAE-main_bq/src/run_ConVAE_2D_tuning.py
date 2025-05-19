@@ -1,11 +1,11 @@
 import sys
-
+from datetime import datetime
 import matplotlib
 import numpy as np
 import pandas as pd
 import argparse
 import datetime as dt
-from ray.tune.schedulers import ASHAScheduler
+#from ray.tune.schedulers import ASHAScheduler
 sys.path.append("../src")
 import os
 import sys
@@ -40,7 +40,7 @@ from utils.logging_utils import (
     )
 
 ## To-Do: Think about wether ALL plotting should be deactivated during tuning.
-os.environ["TUNE_DISABLE_STRICT_METRIC_CHECKING"] = "1"
+#os.environ["TUNE_DISABLE_STRICT_METRIC_CHECKING"] = "1"
 
 # Use non-interactive plotting to avoid tmux crashes
 matplotlib.use("Agg")
@@ -68,7 +68,8 @@ def tune_ContrastVAE(
     base_dir = os.path.dirname(__file__)  # Directory where the script is located
 
     # make a unique run name
-    run_name = f"ContrastVAE_tuning_{learning_rate}"
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    run_name = f"ContrastVAE_tuning_{timestamp}"
 
     # Config has default parameters you may want to check
     config = Config_2D(
@@ -81,7 +82,7 @@ def tune_ContrastVAE(
         MRI_DATA_PATH_TEST="/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data/test_xml_data",
         ATLAS_NAME=atlas_name,
         PROC_DATA_PATH="/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data/proc_extracted_xml_data",
-        OUTPUT_DIR="/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/analysis",
+        OUTPUT_DIR="/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/analysis/TUNING",
         VOLUME_TYPE= "Vgm",
         VALID_VOLUME_TYPES=["Vgm", "Vwm", "csf"],
         # Loading Model
@@ -111,7 +112,7 @@ def tune_ContrastVAE(
         UMAP_DOT_SIZE=20,
         METRICS_ROLLING_WINDOW=10,
         # Data Parameters
-        BATCH_SIZE=64,
+        BATCH_SIZE=32,
         DIAGNOSES=["HC"],
         # COVARS=["Dataset"],
         # Misc.
@@ -130,7 +131,7 @@ def tune_ContrastVAE(
     ## 1. Load Data and Initialize Model --------------------------------
     # Load train data
     if config.ATLAS_NAME != "all":
-        subjects, annotations = load_mri_data_2D(
+        subjects, annotations,roi_names = load_mri_data_2D(
             csv_paths=config.TRAIN_CSV,
             data_path=config.MRI_DATA_PATH_TRAIN,
             atlas_name=atlas_name,
@@ -145,7 +146,7 @@ def tune_ContrastVAE(
     else:
         all_data_paths = get_all_data(directory=config.MRI_DATA_PATH_TRAIN, ext="h5")
         
-        subjects, annotations = load_mri_data_2D_all_atlases(
+        subjects, annotations, roi_names = load_mri_data_2D_all_atlases(
             csv_paths=config.TRAIN_CSV,
             data_paths=all_data_paths,
             # covars=config.COVARS,
@@ -268,12 +269,12 @@ def tune_ContrastVAE(
 if __name__ == "__main__": 
     # Define search space
     search_space = {
-        "learning_rate": tune.loguniform(1e-5, 5e-4),
-        "kldiv_loss_weight": tune.loguniform(1, 12),
-        "latent_dim": tune.choice([10, 20, 40, 60]),
-        "weight_decay": tune.loguniform(1e-4, 1e-2),
-        "contr_loss_weight": tune.loguniform(1, 8),
-        "recon_loss_weight": tune.loguniform(10, 40),
+        "learning_rate": tune.loguniform(1e-5, 5e-3),  
+        "kldiv_loss_weight": tune.loguniform(0.1, 5),  
+        "latent_dim": tune.choice([32, 64, 128]),  
+        "weight_decay": tune.loguniform(1e-5, 1e-2),  
+        "contr_loss_weight": tune.loguniform(0.5, 5),  
+        "recon_loss_weight": tune.loguniform(10, 50),  
     }
 
     arg_parser = create_arg_parser()
@@ -297,7 +298,8 @@ if __name__ == "__main__":
             num_samples=100,  # Increased search count
             metric="t_recon_loss",
             mode="min",
-            scheduler=ASHAScheduler(grace_period=5, reduction_factor=2),  # Prunes bad trials
+            max_concurrent_trials=1
+            #scheduler=ASHAScheduler(grace_period=5, reduction_factor=2),  # Prunes bad trials
         ),
         run_config=tune.RunConfig(
             name=atlas_name,
@@ -308,26 +310,7 @@ if __name__ == "__main__":
         param_space=search_space
     )
 
-    # tuner = tune.Tuner(
-    #     tune.with_resources(
-    #         tune_ContrastVAE,
-    #         resources={"cpu": 10, "gpu": 2}
-    #         ),
-    #     tune_config=tune.TuneConfig(
-    #             time_budget_s=3600,
-    #             num_samples=-1,
-    #             metric="t_recon_loss",
-    #             mode="min",
-    #             max_concurrent_trials=1
-    #         ),
-    #     run_config=tune.RunConfig(
-    #         name=atlas_name,
-    #         storage_path=local_dir,
-    #         log_to_file=True,
-    #         stop={"t_recon_loss":0.02},
-    #         ),
-    #     param_space=search_space
-    # )
+
         
     analysis = tuner.fit()
 
@@ -350,5 +333,9 @@ if __name__ == "__main__":
 
     print(analysis.get_dataframe(filter_metric="t_recon_loss", filter_mode="min"))
 
+    # results = analysis.get_dataframe(filter_metric="t_recon_loss", filter_mode="min")
+    # results.to_csv(f"/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/analysis/ray_results/ray_results_{atlas_name}.csv")
+
     results = analysis.get_dataframe(filter_metric="t_recon_loss", filter_mode="min")
-    results.to_csv(f"/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/analysis/ray_results/ray_results_{atlas_name}.csv")
+    print(results.head())  # Shows top-ranked trials
+    results.to_csv(f"/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/analysis/best_tuning_results.csv")

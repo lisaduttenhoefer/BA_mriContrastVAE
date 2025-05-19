@@ -440,7 +440,9 @@ def train_ContrastVAE_2D(
         
         # Train for one epoch
         train_metrics = model.train_one_epoch(train_loader=train_loader, epoch=epoch)
-        
+        t_recon_loss = train_metrics.get("recon_loss", None)
+        v_recon_loss = valid_metrics.get("recon_loss", None)
+
         # Track best accuracy
         best_accuracy = 0
         if epoch != config.START_EPOCH:
@@ -461,15 +463,15 @@ def train_ContrastVAE_2D(
         if accuracy_tune:
             try:
                 tune.report(
-                    train_loss=train_loss,
-                    t_contr_loss=t_contr_loss,
-                    t_recon_loss=t_recon_loss,  # Dies ist die fehlende Metrik
-                    t_kldiv_loss=t_kldiv_loss,
-                    valid_loss=valid_loss,
-                    v_contr_loss=v_contr_loss,
-                    v_recon_loss=v_recon_loss,
-                    v_kldiv_loss=v_kldiv_loss,
-                    accuracy=accuracy,
+                    train_loss=train_metrics["train_loss"],
+                    t_contr_loss=train_metrics["contr_loss"],
+                    t_recon_loss=t_recon_loss,  
+                    t_kldiv_loss=train_metrics["kldiv_loss"],
+                    valid_loss=valid_metrics["valid_loss"],
+                    v_contr_loss=valid_metrics["contr_loss"],
+                    v_recon_loss=v_recon_loss,  
+                    v_kldiv_loss=valid_metrics["kldiv_loss"],
+                    accuracy=valid_metrics["accuracy"],
                     learning_rate=optimizer.param_groups[0]["lr"]
                 )
             except:

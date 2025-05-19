@@ -103,7 +103,7 @@ def read_hdf5_to_df(filepath: str):
         print(f"File {filepath} does not exist")
         return None
     try:
-        return pd.read_hdf(filepath, key='atlas_data')
+        return pd.read_hdf(filepath, key='data') #atlas_data
     except Exception as e:
         print(f"Error reading {filepath}: {e}")
         return None
@@ -114,12 +114,12 @@ def read_hdf5_to_df_t(filepath: str):
         print(f"File {filepath} does not exist")
         return None
     try:
-        return pd.read_hdf(filepath, key='atlas_data_t')
+        return pd.read_hdf(filepath, key='data') #atlas_data
     except Exception as e:
         print(f"Error reading {filepath}: {e}")
         return None
 
-#splitting the HC patients in training and validation subsets
+
 def train_val_split_annotations(
     # The annotations dataframe that you want to split into a train and validation part
     annotations: pd.DataFrame,
@@ -168,11 +168,14 @@ def train_val_split_annotations(
                 )
                 valid = pd.concat([valid, dataset_annotations[split:]], ignore_index=True)
 
+    print(f"training set after train/val/split:{train.shape}")
+    print(f"validation set after train/val/split:{valid.shape}")
+
     # return the split annotations. They have no overlap.
     return train, valid
 
 def train_val_split_subjects(
-    # The list of patients that should be split according to the prior train_val_split
+    # The list of patients that should be split according to the prior train_split
     subjects: List[dict], 
     # Training annotations
     train_ann: pd.DataFrame, 
@@ -183,8 +186,13 @@ def train_val_split_subjects(
     train_files = list(train_ann["Filename"])
     valid_files = list(val_ann["Filename"])
 
+    print(f"train_files:{len(train_files)}")
+    print(f"valid_files:{len(valid_files)}")
+
     train_subjects = []
     valid_subjects = []
+    print(f"[DEBUG] Number of training annotations: {len(train_files)}")
+    print(f"[DEBUG] Number of validation annotations: {len(valid_files)}")
 
     for subject in subjects:
 
@@ -199,13 +207,6 @@ def train_val_split_subjects(
 
     return train_subjects, valid_subjects
 
-
-# This function loads MRI data (nii.gz or .nii file formats) and stores it in a list of tio.Subject objects. The filenames
-# that are used to load the MRI data are stored in a CSV file, or provided as an annotations pandas DataFrame. The
-# diagnoses and covariates are one-hot encoded and stored in the tio.Subject objects (covariates are other variables that
-# are not diagnoses, that the user specifies, that are in the CSV or annotations). The diagnoses of the subjects can be
-# filtered by providing a list of diagnoses. The function returns the list of tio.Subject objects and the annotations the
-# filtered annotations pandas DataFrame.
 
 
 class CustomDataset_2D():  
@@ -280,8 +281,8 @@ def load_mri_data_2D(
         data_overview = annotations
 
     # If no diagnoses are provided, use all diagnoses in the data overview
-    if diagnoses is None:
-        diagnoses = data_overview["Diagnosis"].unique().tolist()
+    # if diagnoses is None:
+    #     diagnoses = data_overview["Diagnosis"].unique().tolist()
     
     # If the covariates are not a list, make them a list
     if not isinstance(covars, list):
@@ -296,11 +297,16 @@ def load_mri_data_2D(
 
     # Filter unwanted diagnoses
     
-    data_overview = data_overview[data_overview["Diagnosis"].isin(diagnoses)]
-    print(f"[INFO] Number of samples after diagnosis filtering: {len(data_overview)}")
-    print("[INFO] Sample count per diagnosis after filtering:")
-    print(data_overview["Diagnosis"].value_counts())
-    data_overview = data_overview.drop(columns=['Unnamed: 0'])
+    # data_overview = data_overview[data_overview["Diagnosis"].isin(diagnoses)]
+    # print(f"[INFO] Number of samples after diagnosis filtering: {len(data_overview)}")
+    # print("[INFO] Sample count per diagnosis after filtering:")
+    # print(data_overview["Diagnosis"].value_counts())
+
+    # Entferne die unnötige Spalte, falls vorhanden
+    if "Unnamed: 0" in data_overview.columns:
+        data_overview = data_overview.drop(columns=["Unnamed: 0"])
+
+    print(f"[INFO] Number of samples in metadata: {len(data_overview)}")
     print(f"[INFO] Number of samples after column dropping: {len(data_overview)}")
     data_overview = data_overview[["Filename", "Dataset", "Diagnosis" , "Age", "Sex", "Usage_original", "Sex_int"]]
 
@@ -475,12 +481,16 @@ def load_mri_data_2D_all_atlases(
     variables = ["Diagnosis"] + covars
 
     # Filter unwanted diagnoses
-    data_overview = data_overview[data_overview["Diagnosis"].isin(diagnoses)]
-    print(f"[INFO] Number of samples after diagnosis filtering: {len(data_overview)}")
+    #data_overview = data_overview[data_overview["Diagnosis"].isin(diagnoses)]
+    #print(f"[INFO] Number of samples after diagnosis filtering: {len(data_overview)}")
+    print(f"[INFO] Number of samples in metadata: {len(data_overview)}")
     print("[INFO] Sample count per diagnosis after filtering:")
     print(data_overview["Diagnosis"].value_counts())
     
-    data_overview = data_overview.drop(columns=['Unnamed: 0'])
+    # Entferne die unnötige Spalte, falls vorhanden
+    if "Unnamed: 0" in data_overview.columns:
+        data_overview = data_overview.drop(columns=["Unnamed: 0"])
+    
     data_overview = data_overview[["Filename", "Dataset", "Diagnosis", "Age", "Sex", "Usage_original", "Sex_int"]]
     print(f"[INFO] Number of samples after column dropping: {len(data_overview)}")
 
@@ -506,76 +516,111 @@ def load_mri_data_2D_all_atlases(
             data = read_hdf5_to_df(filepath=data_path)
         else:
             data = pd.read_csv(data_path, header=[0, 1], index_col=0)
-        
+
+        # Get the column names
+        patient_ids_multiindex = data.columns.get_level_values(0)
+        unique_patient_ids = patient_ids_multiindex.unique().tolist()
+        print(f"[DEBUG] Unique patient IDs from {os.path.basename(data_path)}: {unique_patient_ids[:5]} ... (total: {len(unique_patient_ids)})")
+
         # Extract ROI names for this specific atlas
         base_roi_names = data.index.tolist()
         atlas_roi_names = []
         
-        # Format ROI names with the specified volume type
-        if volume_type == "all":
-            # For "all", include all volume types for each ROI
-            for roi in base_roi_names:
-                for vt in valid_volume_types:
-                    atlas_roi_names.append(f"{roi}_{vt}")
-        else:
-            # For specific volume type, only include that type
-            atlas_roi_names = [f"{roi}_{volume_type}" for roi in base_roi_names]
+        # # Format ROI names with the specified volume type
+        # if volume_type == "all":
+        #     # For "all", include all volume types for each ROI
+        #     for roi in base_roi_names:
+        #         for vt in valid_volume_types:
+        #             atlas_roi_names.append(f"{roi}_{vt}")
+        # else:
+        #     # For specific volume type, only include that type
+        #     atlas_roi_names = [f"{roi}_{volume_type}" for roi in base_roi_names]
         
+        # all_roi_names[atlas_name] = atlas_roi_names
+        # all_roi_values_flat.extend(atlas_roi_names)
+        
+        # Filter data based on volume_type if needed
+        data_filtered = pd.DataFrame()
+        if volume_type == "all":
+            data_filtered = data.copy()
+        else:
+            cols_to_keep = [col for col in data.columns if col[1] == volume_type]
+            if cols_to_keep:
+                data_filtered = data[cols_to_keep].copy()
         all_roi_names[atlas_name] = atlas_roi_names
         all_roi_values_flat.extend(atlas_roi_names)
         
-        # Filter data based on volume_type if needed
-        if volume_type != "all":
-            # Extract only the columns with the specified volume type from the MultiIndex
-            filtered_columns = []
-            for col in data.columns:
-                if isinstance(col, tuple) and len(col) > 1 and col[1] == volume_type:
-                    filtered_columns.append(col)
-                elif not isinstance(col, tuple) and volume_type in col:
-                    # Handle case where MultiIndex isn't properly formed but column name contains volume type
-                    filtered_columns.append(col)
-            
-            data = data[filtered_columns]
-        
-        data = normalize_and_scale_df(data)
-        
+        data_normalized = normalize_and_scale_df(data_filtered)
+        all_processed_patient_ids = data_normalized.columns.get_level_values(0).unique().tolist()
+
         if save:
             volume_suffix = "_all" if volume_type == "all" else f"_{volume_type}"
             data.to_csv(f"data/proc_extracted_xml_data/Proc_{atlas_name}{volume_suffix}_{train_or_test}.csv")
             
         all_file_names = data.columns
-
+        print(f"shape normalisierter dataframe:{all_file_names.shape}")
         for index, row in data_overview.iterrows():
-            if row["Filename"] not in all_file_names:
+            ###
+            original_filename = row["Filename"]
+            base_filename = original_filename.replace(".nii.gz", "").replace(".nii", "").replace(".h5", "")
+
+            if base_filename in all_processed_patient_ids:
+                # STEP 5: Select patient data from the normalized DataFrame
+                patient_data = data_normalized.loc[:, (base_filename,)]
+                flat_patient_data = patient_data.values.flatten().tolist()
+                file_name = base_filename
+
+                if file_name not in subjects:
+                    subjects[file_name] = {
+                        "name": file_name,
+                        "measurements": flat_patient_data,
+                        "labels": {}
+                    }
+                    for var in variables:
+                        subjects[file_name]["labels"][var] = one_hot_labels[var].iloc[index].to_numpy().tolist()
+                else:
+                    subjects[file_name]["measurements"] += flat_patient_data
+            else:
+                print(f"[DEBUG] Patient ID {base_filename} (from {original_filename}) not found in normalized data of {os.path.basename(data_path)}")
                 continue
-
-            # Format correct filename
-            if row["Filename"].endswith(".nii") or row["Filename"].endswith(".nii.gz"):
-                pre_file_name = row["Filename"]
-                match_no_ext = re.search(r"([^/\\]+)\.[^./\\]*$", pre_file_name)  # Extract file stem
-                if match_no_ext:
-                    file_name = match_no_ext.group(1)
-            else:
-                file_name = row["Filename"]
-
-            patient_data = data[file_name]
-            flat_patient_data = flatten_array(patient_data).tolist()
-
-            if file_name not in subjects:
-                subjects[file_name] = {
-                    "name": file_name,
-                    "measurements": flat_patient_data,
-                    "labels": {}
-                }
-                
-                for var in variables:
-                    subjects[file_name]["labels"][var] = one_hot_labels[var].iloc[index].to_numpy().tolist()
-            else:
-                # Append data from additional atlases to existing subject data
-                subjects[file_name]["measurements"] += flat_patient_data
 
     # Return the list of subjects, the filtered annotations, and the ROI names dictionary
     return list(subjects.values()), data_overview, all_roi_values_flat
+
+
+
+
+    #         if row["Filename"] not in all_file_names:
+    #             print(f"[DEBUG] Filename from data_overview not in all_file_names: {row['Filename']}") # ADDED PRINT
+    #             continue
+
+    #         # Format correct filename
+    #         if row["Filename"].endswith(".nii") or row["Filename"].endswith(".nii.gz"):
+    #             pre_file_name = row["Filename"]
+    #             match_no_ext = re.search(r"([^/\\]+)\.[^./\\]*$", pre_file_name)  # Extract file stem
+    #             if match_no_ext:
+    #                 file_name = match_no_ext.group(1)
+    #         else:
+    #             file_name = row["Filename"]
+
+    #         patient_data = data[file_name]
+    #         flat_patient_data = flatten_array(patient_data).tolist()
+
+    #         if file_name not in subjects:
+    #             subjects[file_name] = {
+    #                 "name": file_name,
+    #                 "measurements": flat_patient_data,
+    #                 "labels": {}
+    #             }
+                
+    #             for var in variables:
+    #                 subjects[file_name]["labels"][var] = one_hot_labels[var].iloc[index].to_numpy().tolist()
+    #         else:
+    #             # Append data from additional atlases to existing subject data
+    #             subjects[file_name]["measurements"] += flat_patient_data
+
+    # # Return the list of subjects, the filtered annotations, and the ROI names dictionary
+    # return list(subjects.values()), data_overview, all_roi_values_flat
 
 #################
 
