@@ -70,7 +70,7 @@ def create_arg_parser():
     parser.add_argument('--atlas_name', help='Name of the desired atlas for training.', type=str, default="all")
     parser.add_argument('--num_epochs', help='Number of epochs to be trained for', type=int, default=100)
     parser.add_argument('--n_bootstraps', help='Number of bootstrap samples', type=int, default=50)
-    parser.add_argument('--norm_diagnosis', help='which diagnosis is considered the "norm"', type=str, default="SCHZ")
+    parser.add_argument('--norm_diagnosis', help='which diagnosis is considered the "norm"', type=str, default="MDD")
     parser.add_argument('--train_ratio', help='Normpslit ratio', type=float, default=0.7)
     parser.add_argument('--batch_size', help='Batch size', type=int, default=32)
     parser.add_argument('--learning_rate', help='Learning rate', type=float, default=0.000559) #vor tuning: 4e-5
@@ -269,7 +269,7 @@ def main(atlas_name: str, num_epochs: int, n_bootstraps: int,norm_diagnosis: str
     # Save the processed annotations for later use
     #annotations.to_csv(f"{save_dir}/data/processed_annotations.csv", index=False)
 
-
+    print("\n[DEBUG] === STARTING DATA LOADER PREPARATION ===")
     # Prepare data loaders
     train_loader_norm = process_subjects(
         subjects=train_subjects_norm,
@@ -298,10 +298,12 @@ def main(atlas_name: str, num_epochs: int, n_bootstraps: int,norm_diagnosis: str
     # Initialize Model
     log_model_setup()
     
+
     # Extract features as torch tensors
     train_data = extract_measurements(train_subjects_norm)
     valid_data = extract_measurements(valid_subjects_norm)
-    
+    log_and_print(train_data)
+    log_and_print(valid_data)
     log_and_print(f"Training data shape: {train_data.shape}")
     log_and_print(f"Validation data shape: {valid_data.shape}")
 
@@ -336,6 +338,7 @@ def main(atlas_name: str, num_epochs: int, n_bootstraps: int,norm_diagnosis: str
     #     log_and_print("torchviz not available, skipping model architecture visualization")
     
     # Before bootstrap training, train and evaluate a single baseline model for reference
+    
     log_and_print("Training baseline model before bootstrap training...")
     baseline_model, baseline_history = train_normative_model_plots(
         train_data=train_data,
