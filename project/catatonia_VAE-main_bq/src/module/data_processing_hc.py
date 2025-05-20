@@ -8,6 +8,7 @@ import scanpy as sc
 from typing import List, Tuple
 import numpy as np
 import pathlib
+import h5py
 import torch
 import torchio as tio
 from torch.utils.data import DataLoader
@@ -97,13 +98,49 @@ def combine_dfs(paths: list):
         joined_df = pd.read_csv(paths[0], header=[0])
     return joined_df
 
+def read_hdf5_to_df(filepath: str) -> pd.DataFrame:
+    """
+    Read HDF5 file and convert to pandas DataFrame.
+    
+    Parameters:
+    - filepath: Path to the HDF5 file
+    
+    Returns:
+    - DataFrame containing the HDF5 data
+    """
+    try:
+        with h5py.File(filepath, 'r') as f:
+            # Print the structure of the HDF5 file for debugging
+            print(f"[DEBUG] HDF5 file structure: {list(f.keys())}")
+            
+            # Assuming HDF5 file contains 'data' and 'index' datasets
+            if 'data' in f and 'index' in f and 'columns' in f:
+                data = f['data'][:]
+                index = [idx.decode('utf-8') if isinstance(idx, bytes) else idx for idx in f['index'][:]]
+                columns = [col.decode('utf-8') if isinstance(col, bytes) else col for col in f['columns'][:]]
+                
+                df = pd.DataFrame(data, index=index, columns=columns)
+            else:
+                # Try to load with pandas directly
+                df = pd.read_hdf(filepath)
+                
+            return df
+    except Exception as e:
+        print(f"[ERROR] Failed to load HDF5 file {filepath}: {e}")
+        # Try pandas direct method as fallback
+        try:
+            df = pd.read_hdf(filepath)
+            return df
+        except Exception as e2:
+            print(f"[ERROR] Fallback also failed: {e2}")
+            raise
 
-def read_hdf5_to_df(filepath: str):
+def read_hdf5_to_df_OLD(filepath: str):
     if not os.path.exists(filepath):
         print(f"File {filepath} does not exist")
         return None
     try:
-        return pd.read_hdf(filepath, key='data') #atlas_data
+        return pd.read_hdf(filepath, key='atlas_data')
     except Exception as e:
         print(f"Error reading {filepath}: {e}")
         return None
@@ -114,12 +151,12 @@ def read_hdf5_to_df_t(filepath: str):
         print(f"File {filepath} does not exist")
         return None
     try:
-        return pd.read_hdf(filepath, key='data') #atlas_data
+        return pd.read_hdf(filepath, key='atlas_data_t')
     except Exception as e:
         print(f"Error reading {filepath}: {e}")
         return None
 
-
+#splitting the HC patients in training and validation subsets
 def train_val_split_annotations(
     # The annotations dataframe that you want to split into a train and validation part
     annotations: pd.DataFrame,
@@ -128,7 +165,7 @@ def train_val_split_annotations(
     # The diagnoses you want to include in the split, defaults to all
     diagnoses: List[str] = None,
     # The datasets you want to include in the split, defaults to all
-    datasets: List[str] = None,
+    #datasets: List[str] = None,
     # The random seed for reproducibility
     seed: int = 123,
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
@@ -137,13 +174,15 @@ def train_val_split_annotations(
     train = pd.DataFrame()
     valid = pd.DataFrame()
 
+    # If diagnoses is a string, convert to list
+    if isinstance(diagnoses, str):
+        diagnoses = [diagnoses]
     # If no diagnoses are specified, use all diagnoses in the annotations
-    if diagnoses is None:
-        diagnoses = annotations["Diagnosis"].unique()
-
-    # If no datasets are specified, use all datasets in the annotations
-    if datasets is None:
-        datasets = annotations["Dataset"].unique()
+    elif diagnoses is None:
+        diagnoses = annotations["Diagnosis"].unique().tolist()
+    
+    # Get all datasets in the annotations
+    datasets = annotations["Dataset"].unique()
 
     # For each diagnosis, dataset and sex, take a random sample of the data and split it into train and test
     for diagnosis in diagnoses:
@@ -168,14 +207,61 @@ def train_val_split_annotations(
                 )
                 valid = pd.concat([valid, dataset_annotations[split:]], ignore_index=True)
 
-    print(f"training set after train/val/split:{train.shape}")
-    print(f"validation set after train/val/split:{valid.shape}")
-
     # return the split annotations. They have no overlap.
     return train, valid
 
 def train_val_split_subjects(
-    # The list of patients that should be split according to the prior train_split
+    subjects: List[dict],
+    train_ann: pd.DataFrame,
+    val_ann: pd.DataFrame
+) -> Tuple[List, List]:
+    """
+    Split subject data based on previously split annotations.
+    
+    Parameters:
+    - subjects: List of dictionaries containing subject data
+    - train_ann: Training annotations DataFrame
+    - val_ann: Validation annotations DataFrame
+    
+    Returns:
+    - Tuple of training and validation subject lists
+    """
+    # Get filenames from annotations
+    train_files = set(train_ann["Filename"].str.replace('.nii.gz', '').str.replace('.nii', ''))
+    valid_files = set(val_ann["Filename"].str.replace('.nii.gz', '').str.replace('.nii', ''))
+    
+    # Initialize lists for subjects
+    train_subjects = []
+    valid_subjects = []
+    unmatched_subjects = []
+    
+    # Assign subjects to train or validation set
+    for subject in subjects:
+        subject_name = subject["name"]
+        # Remove file extensions if present
+        subject_name_clean = subject_name.replace('.nii.gz', '').replace('.nii', '')
+        
+        if subject_name_clean in train_files:
+            train_subjects.append(subject)
+        elif subject_name_clean in valid_files:
+            valid_subjects.append(subject)
+        else:
+            unmatched_subjects.append(subject_name)
+    
+    print(f"[INFO] Assigned {len(train_subjects)} subjects to training set")
+    print(f"[INFO] Assigned {len(valid_subjects)} subjects to validation set")
+    
+    if unmatched_subjects:
+        print(f"[WARNING] {len(unmatched_subjects)} subjects not found in annotations:")
+        for i, name in enumerate(unmatched_subjects[:5]):
+            print(f"  - {name}")
+        if len(unmatched_subjects) > 5:
+            print(f"  ... and {len(unmatched_subjects) - 5} more")
+    
+    return train_subjects, valid_subjects
+
+def train_val_split_subjects_OLD(
+    # The list of patients that should be split according to the prior train_val_split
     subjects: List[dict], 
     # Training annotations
     train_ann: pd.DataFrame, 
@@ -186,13 +272,8 @@ def train_val_split_subjects(
     train_files = list(train_ann["Filename"])
     valid_files = list(val_ann["Filename"])
 
-    print(f"train_files:{len(train_files)}")
-    print(f"valid_files:{len(valid_files)}")
-
     train_subjects = []
     valid_subjects = []
-    print(f"[DEBUG] Number of training annotations: {len(train_files)}")
-    print(f"[DEBUG] Number of validation annotations: {len(valid_files)}")
 
     for subject in subjects:
 
@@ -207,6 +288,13 @@ def train_val_split_subjects(
 
     return train_subjects, valid_subjects
 
+
+# This function loads MRI data (nii.gz or .nii file formats) and stores it in a list of tio.Subject objects. The filenames
+# that are used to load the MRI data are stored in a CSV file, or provided as an annotations pandas DataFrame. The
+# diagnoses and covariates are one-hot encoded and stored in the tio.Subject objects (covariates are other variables that
+# are not diagnoses, that the user specifies, that are in the CSV or annotations). The diagnoses of the subjects can be
+# filtered by providing a list of diagnoses. The function returns the list of tio.Subject objects and the annotations the
+# filtered annotations pandas DataFrame.
 
 
 class CustomDataset_2D():  
@@ -234,8 +322,199 @@ class CustomDataset_2D():
         return measurements, labels, names
 
 #################
+import os
+import re
+import pandas as pd
+from typing import Tuple, List
+
+def read_hdf5_to_df(filepath: str) -> pd.DataFrame:
+    """
+    Read HDF5 file and convert to pandas DataFrame.
+    
+    Parameters:
+    - filepath: Path to the HDF5 file
+    
+    Returns:
+    - DataFrame containing the HDF5 data
+    """
+    import h5py
+    
+    try:
+        with h5py.File(filepath, 'r') as f:
+            # Print the structure of the HDF5 file for debugging
+            print(f"[DEBUG] HDF5 file structure: {list(f.keys())}")
+            
+            # Assuming HDF5 file contains 'data' and 'index' datasets
+            if 'data' in f and 'index' in f and 'columns' in f:
+                data = f['data'][:]
+                index = [idx.decode('utf-8') if isinstance(idx, bytes) else idx for idx in f['index'][:]]
+                columns = [col.decode('utf-8') if isinstance(col, bytes) else col for col in f['columns'][:]]
+                df = pd.DataFrame(data, index=index, columns=columns)
+            else:
+                # Try to load with pandas directly
+                df = pd.read_hdf(filepath)
+            return df
+    except Exception as e:
+        print(f"[ERROR] Failed to load HDF5 file {filepath}: {e}")
+        
+        # Try pandas direct method as fallback
+        try:
+            df = pd.read_hdf(filepath)
+            return df
+        except Exception as e2:
+            print(f"[ERROR] Fallback also failed: {e2}")
+            raise
+
+def combine_dfs(csv_paths: List[str]) -> pd.DataFrame:
+    """Combine multiple CSV files into a single DataFrame."""
+    dfs = []
+    for path in csv_paths:
+        df = pd.read_csv(path)
+        dfs.append(df)
+    return pd.concat(dfs, ignore_index=True)
+
+def normalize_and_scale_df(df: pd.DataFrame) -> pd.DataFrame:
+    """Normalize and scale data in a DataFrame."""
+    # This is a placeholder - implement your actual normalization logic
+    return df  # Return original dataframe if no normalization needed
+
+def flatten_array(arr):
+    """Flatten an array or series to 1D."""
+    if isinstance(arr, pd.Series):
+        return arr.values
+    return arr.flatten() if hasattr(arr, 'flatten') else arr
+
+import os
+import pandas as pd
+import re
+from typing import List, Tuple
+
 def load_mri_data_2D(
-    # The path to the directory where the MRI data is stored (.csv file formats)
+    data_path: str,
+    atlas_name: str,
+    csv_paths: list = None,
+    annotations: pd.DataFrame = None,
+    diagnoses: List[str] = None,
+    covars: List[str] = [],
+    hdf5: bool = True,
+    train_or_test: str = "train",
+    save: bool = False,
+    volume_type: str = "all",
+    valid_volume_types: List[str] = ["Vgm", "Vwm", "csf"],
+) -> Tuple:
+    
+    print("[DEBUG] Starting load_mri_data_2D function...")
+    
+    atlas_data_path = f"{data_path}/Aggregated_{atlas_name}.h5"
+    print(f"[DEBUG] Atlas data path set to: {atlas_data_path}")
+    
+    # Handle CSV paths
+    if csv_paths is not None:
+        for csv_path in csv_paths: 
+            assert os.path.isfile(csv_path), f"[ERROR] CSV file '{csv_path}' not found"
+            assert annotations is None, "[ERROR] Both CSV and annotations provided"
+        print("[DEBUG] Loading CSV metadata...")
+        data_overview = combine_dfs(csv_paths)
+        print("[DEBUG] CSV data successfully combined.")
+        
+    # Handle annotations
+    elif annotations is not None:
+        assert isinstance(annotations, pd.DataFrame), "[ERROR] Annotations must be a pandas DataFrame"
+        assert csv_paths is None, "[ERROR] Both CSV and annotations provided"
+        data_overview = annotations
+        print("[DEBUG] Annotations loaded successfully.")
+        
+    else:
+        raise ValueError("[ERROR] No CSV path or annotations provided!")
+    
+    # Handling diagnoses filtering
+    if diagnoses is None:
+        diagnoses = data_overview["Diagnosis"].unique().tolist()
+        print(f"[DEBUG] Defaulting to all diagnoses: {diagnoses}")
+    
+    data_overview = data_overview[data_overview["Diagnosis"].isin(diagnoses)]
+    print(f"[DEBUG] Number of samples after diagnosis filtering: {len(data_overview)}")
+    
+    # Handling covariates and diagnoses lists
+    covars = [covars] if not isinstance(covars, list) else covars
+    diagnoses = [diagnoses] if not isinstance(diagnoses, list) else diagnoses
+    print(f"[DEBUG] Covariates processed: {covars}")
+    
+    # Prepare one-hot encoded labels
+    one_hot_labels = {}
+    variables = ["Diagnosis"] + covars
+    
+    for var in variables:
+        if var not in data_overview.columns:
+            raise ValueError(f"[ERROR] Column '{var}' not found in CSV file or annotations")
+        one_hot_labels[var] = pd.get_dummies(data_overview[var], dtype=float)
+        print(f"[DEBUG] One-hot encoding completed for variable: {var}")
+    
+    # Load MRI data
+    print("[DEBUG] Loading MRI data...")
+    
+    if hdf5:
+        data = read_hdf5_to_df(filepath=atlas_data_path)
+    else:
+        data = pd.read_csv(atlas_data_path, header=[0, 1], index_col=0)
+    
+    print("[DEBUG] MRI data loaded successfully.")
+    
+    # Extract ROI names
+    roi_names = []
+    base_roi_names = data.index.tolist()
+    
+    if volume_type == "all":
+        roi_names = [f"{roi}_{vt}" for roi in base_roi_names for vt in valid_volume_types]
+    else:
+        roi_names = [f"{roi}_{volume_type}" for roi in base_roi_names]
+    
+    print(f"[DEBUG] Extracted ROI names: {roi_names[:5]} ...")  # Only show first few
+    
+    # Validate volume type
+    if volume_type != "all" and volume_type not in valid_volume_types:
+        raise ValueError(f"[ERROR] Invalid volume_type: {volume_type}")
+    
+    # Normalize and scale data
+    data = normalize_and_scale_df(data)
+    print("[DEBUG] MRI data normalized and scaled.")
+    
+    # Save processed data if needed
+    if save:
+        volume_suffix = "_all" if volume_type == "all" else f"_{volume_type}"
+        save_path = f"data/proc_extracted_xml_data/Proc_{atlas_name}{volume_suffix}_{train_or_test}.csv"
+        data.to_csv(save_path)
+        print(f"[DEBUG] Processed MRI data saved to: {save_path}")
+    
+    all_file_names = data.columns
+    subjects = []
+
+    for index, row in data_overview.iterrows():
+        subject = {} 
+        
+        if row["Filename"] not in all_file_names:
+            print(f"[WARNING] Filename {row['Filename']} not found in MRI data.")
+            continue
+
+        # Format filename correctly
+        file_name = re.sub(r"\.[^.]+$", "", row["Filename"])
+        patient_data = data[file_name]
+        flat_patient_data = flatten_array(patient_data).to_numpy().tolist()
+
+
+        subject["name"] = file_name
+        subject["measurements"] = flat_patient_data
+        subject["labels"] = {var: one_hot_labels[var].iloc[index].to_numpy().tolist() for var in variables}
+
+        subjects.append(subject)
+        print(f"[DEBUG] Added subject: {file_name}")
+
+    print("[DEBUG] Data loading complete!")
+    return subjects, data_overview, roi_names
+
+
+def load_mri_data_2D_OLDIE(
+    # The path to the directory where the MRI data is stored (.h5 file formats)
     data_path: str,
     # Name of the atlas that should be used for training.
     atlas_name: str,
@@ -260,7 +539,7 @@ def load_mri_data_2D(
 
     atlas_data_path = f"{data_path}/Aggregated_{atlas_name}.h5"
     #atlas_data_path = f"/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data/train_xml_data/Aggregated_cobra.h5"
-
+    
     # If the CSV path is provided, check if the file exists, make sure that the annotations are not provided
     if csv_paths is not None:
         for csv_path in csv_paths: 
@@ -281,8 +560,8 @@ def load_mri_data_2D(
         data_overview = annotations
 
     # If no diagnoses are provided, use all diagnoses in the data overview
-    # if diagnoses is None:
-    #     diagnoses = data_overview["Diagnosis"].unique().tolist()
+    if diagnoses is None:
+        diagnoses = data_overview["Diagnosis"].unique().tolist()
     
     # If the covariates are not a list, make them a list
     if not isinstance(covars, list):
@@ -297,16 +576,11 @@ def load_mri_data_2D(
 
     # Filter unwanted diagnoses
     
-    # data_overview = data_overview[data_overview["Diagnosis"].isin(diagnoses)]
-    # print(f"[INFO] Number of samples after diagnosis filtering: {len(data_overview)}")
-    # print("[INFO] Sample count per diagnosis after filtering:")
-    # print(data_overview["Diagnosis"].value_counts())
-
-    # Entferne die unnötige Spalte, falls vorhanden
-    if "Unnamed: 0" in data_overview.columns:
-        data_overview = data_overview.drop(columns=["Unnamed: 0"])
-
-    print(f"[INFO] Number of samples in metadata: {len(data_overview)}")
+    data_overview = data_overview[data_overview["Diagnosis"].isin(diagnoses)]
+    print(f"[INFO] Number of samples after diagnosis filtering: {len(data_overview)}")
+    print("[INFO] Sample count per diagnosis after filtering:")
+    print(data_overview["Diagnosis"].value_counts())
+    #data_overview = data_overview.drop(columns=['Unnamed: 0'])
     print(f"[INFO] Number of samples after column dropping: {len(data_overview)}")
     data_overview = data_overview[["Filename", "Dataset", "Diagnosis" , "Age", "Sex", "Usage_original", "Sex_int"]]
 
@@ -481,16 +755,12 @@ def load_mri_data_2D_all_atlases(
     variables = ["Diagnosis"] + covars
 
     # Filter unwanted diagnoses
-    #data_overview = data_overview[data_overview["Diagnosis"].isin(diagnoses)]
-    #print(f"[INFO] Number of samples after diagnosis filtering: {len(data_overview)}")
-    print(f"[INFO] Number of samples in metadata: {len(data_overview)}")
+    data_overview = data_overview[data_overview["Diagnosis"].isin(diagnoses)]
+    print(f"[INFO] Number of samples after diagnosis filtering: {len(data_overview)}")
     print("[INFO] Sample count per diagnosis after filtering:")
     print(data_overview["Diagnosis"].value_counts())
     
-    # Entferne die unnötige Spalte, falls vorhanden
-    if "Unnamed: 0" in data_overview.columns:
-        data_overview = data_overview.drop(columns=["Unnamed: 0"])
-    
+    #data_overview = data_overview.drop(columns=['Unnamed: 0'])
     data_overview = data_overview[["Filename", "Dataset", "Diagnosis", "Age", "Sex", "Usage_original", "Sex_int"]]
     print(f"[INFO] Number of samples after column dropping: {len(data_overview)}")
 
@@ -516,111 +786,76 @@ def load_mri_data_2D_all_atlases(
             data = read_hdf5_to_df(filepath=data_path)
         else:
             data = pd.read_csv(data_path, header=[0, 1], index_col=0)
-
-        # Get the column names
-        patient_ids_multiindex = data.columns.get_level_values(0)
-        unique_patient_ids = patient_ids_multiindex.unique().tolist()
-        print(f"[DEBUG] Unique patient IDs from {os.path.basename(data_path)}: {unique_patient_ids[:5]} ... (total: {len(unique_patient_ids)})")
-
+        
         # Extract ROI names for this specific atlas
         base_roi_names = data.index.tolist()
         atlas_roi_names = []
         
-        # # Format ROI names with the specified volume type
-        # if volume_type == "all":
-        #     # For "all", include all volume types for each ROI
-        #     for roi in base_roi_names:
-        #         for vt in valid_volume_types:
-        #             atlas_roi_names.append(f"{roi}_{vt}")
-        # else:
-        #     # For specific volume type, only include that type
-        #     atlas_roi_names = [f"{roi}_{volume_type}" for roi in base_roi_names]
-        
-        # all_roi_names[atlas_name] = atlas_roi_names
-        # all_roi_values_flat.extend(atlas_roi_names)
-        
-        # Filter data based on volume_type if needed
-        data_filtered = pd.DataFrame()
+        # Format ROI names with the specified volume type
         if volume_type == "all":
-            data_filtered = data.copy()
+            # For "all", include all volume types for each ROI
+            for roi in base_roi_names:
+                for vt in valid_volume_types:
+                    atlas_roi_names.append(f"{roi}_{vt}")
         else:
-            cols_to_keep = [col for col in data.columns if col[1] == volume_type]
-            if cols_to_keep:
-                data_filtered = data[cols_to_keep].copy()
+            # For specific volume type, only include that type
+            atlas_roi_names = [f"{roi}_{volume_type}" for roi in base_roi_names]
+        
         all_roi_names[atlas_name] = atlas_roi_names
         all_roi_values_flat.extend(atlas_roi_names)
         
-        data_normalized = normalize_and_scale_df(data_filtered)
-        all_processed_patient_ids = data_normalized.columns.get_level_values(0).unique().tolist()
-
+        # Filter data based on volume_type if needed
+        if volume_type != "all":
+            # Extract only the columns with the specified volume type from the MultiIndex
+            filtered_columns = []
+            for col in data.columns:
+                if isinstance(col, tuple) and len(col) > 1 and col[1] == volume_type:
+                    filtered_columns.append(col)
+                elif not isinstance(col, tuple) and volume_type in col:
+                    # Handle case where MultiIndex isn't properly formed but column name contains volume type
+                    filtered_columns.append(col)
+            
+            data = data[filtered_columns]
+        
+        data = normalize_and_scale_df(data)
+        
         if save:
             volume_suffix = "_all" if volume_type == "all" else f"_{volume_type}"
             data.to_csv(f"data/proc_extracted_xml_data/Proc_{atlas_name}{volume_suffix}_{train_or_test}.csv")
             
         all_file_names = data.columns
-        print(f"shape normalisierter dataframe:{all_file_names.shape}")
+
         for index, row in data_overview.iterrows():
-            ###
-            original_filename = row["Filename"]
-            base_filename = original_filename.replace(".nii.gz", "").replace(".nii", "").replace(".h5", "")
-
-            if base_filename in all_processed_patient_ids:
-                # STEP 5: Select patient data from the normalized DataFrame
-                patient_data = data_normalized.loc[:, (base_filename,)]
-                flat_patient_data = patient_data.values.flatten().tolist()
-                file_name = base_filename
-
-                if file_name not in subjects:
-                    subjects[file_name] = {
-                        "name": file_name,
-                        "measurements": flat_patient_data,
-                        "labels": {}
-                    }
-                    for var in variables:
-                        subjects[file_name]["labels"][var] = one_hot_labels[var].iloc[index].to_numpy().tolist()
-                else:
-                    subjects[file_name]["measurements"] += flat_patient_data
-            else:
-                print(f"[DEBUG] Patient ID {base_filename} (from {original_filename}) not found in normalized data of {os.path.basename(data_path)}")
+            if row["Filename"] not in all_file_names:
                 continue
+
+            # Format correct filename
+            if row["Filename"].endswith(".nii") or row["Filename"].endswith(".nii.gz"):
+                pre_file_name = row["Filename"]
+                match_no_ext = re.search(r"([^/\\]+)\.[^./\\]*$", pre_file_name)  # Extract file stem
+                if match_no_ext:
+                    file_name = match_no_ext.group(1)
+            else:
+                file_name = row["Filename"]
+
+            patient_data = data[file_name]
+            flat_patient_data = flatten_array(patient_data).tolist()
+
+            if file_name not in subjects:
+                subjects[file_name] = {
+                    "name": file_name,
+                    "measurements": flat_patient_data,
+                    "labels": {}
+                }
+                
+                for var in variables:
+                    subjects[file_name]["labels"][var] = one_hot_labels[var].iloc[index].to_numpy().tolist()
+            else:
+                # Append data from additional atlases to existing subject data
+                subjects[file_name]["measurements"] += flat_patient_data
 
     # Return the list of subjects, the filtered annotations, and the ROI names dictionary
     return list(subjects.values()), data_overview, all_roi_values_flat
-
-
-
-
-    #         if row["Filename"] not in all_file_names:
-    #             print(f"[DEBUG] Filename from data_overview not in all_file_names: {row['Filename']}") # ADDED PRINT
-    #             continue
-
-    #         # Format correct filename
-    #         if row["Filename"].endswith(".nii") or row["Filename"].endswith(".nii.gz"):
-    #             pre_file_name = row["Filename"]
-    #             match_no_ext = re.search(r"([^/\\]+)\.[^./\\]*$", pre_file_name)  # Extract file stem
-    #             if match_no_ext:
-    #                 file_name = match_no_ext.group(1)
-    #         else:
-    #             file_name = row["Filename"]
-
-    #         patient_data = data[file_name]
-    #         flat_patient_data = flatten_array(patient_data).tolist()
-
-    #         if file_name not in subjects:
-    #             subjects[file_name] = {
-    #                 "name": file_name,
-    #                 "measurements": flat_patient_data,
-    #                 "labels": {}
-    #             }
-                
-    #             for var in variables:
-    #                 subjects[file_name]["labels"][var] = one_hot_labels[var].iloc[index].to_numpy().tolist()
-    #         else:
-    #             # Append data from additional atlases to existing subject data
-    #             subjects[file_name]["measurements"] += flat_patient_data
-
-    # # Return the list of subjects, the filtered annotations, and the ROI names dictionary
-    # return list(subjects.values()), data_overview, all_roi_values_flat
 
 #################
 
@@ -943,7 +1178,8 @@ def process_subjects(
     dataset = CustomDataset_2D(subjects=subjects)
 
     # Create data loader
-    data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=shuffle_data)
+    data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=shuffle_data, num_workers=4,
+        pin_memory=True)
 
     # Return the DataLoader object
     return data_loader

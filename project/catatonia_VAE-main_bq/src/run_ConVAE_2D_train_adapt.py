@@ -34,7 +34,8 @@ from utils.config_utils_model import Config_2D
 from module.data_processing_hc import (
     load_checkpoint_model, 
     load_mri_data_2D_all_atlases,
-    load_mri_data_2D, 
+    #load_mri_data_2D_combined, 
+    load_mri_data_2D,
     process_subjects, 
     train_val_split_annotations,
     train_val_split_subjects
@@ -121,7 +122,7 @@ def main(atlas_name: str, num_epochs: int, n_bootstraps: int,norm_diagnosis: str
         TEST_CSV=[TEST_CSV],
         # TRAIN_CSV=["/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data_training/training_metadata.csv"],
         # TEST_CSV=["/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data_training/testing_metadata.csv"],
-        MRI_DATA_PATH="/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data/all_xml_data",
+        MRI_DATA_PATH="/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data/all_csv_data",
         ATLAS_NAME=atlas_name,
         PROC_DATA_PATH="/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data_training/proc_extracted_xml_data",
         OUTPUT_DIR=save_dir,
@@ -194,7 +195,7 @@ def main(atlas_name: str, num_epochs: int, n_bootstraps: int,norm_diagnosis: str
             csv_paths=config.TRAIN_CSV,
             data_path=config.MRI_DATA_PATH,
             atlas_name=config.ATLAS_NAME,
-            diagnoses=norm_diagnosis,  # Only norm controls for normative model
+            diagnoses=[norm_diagnosis],  # Only norm controls for normative model
             hdf5=True,
             train_or_test="train",
             save=True,
