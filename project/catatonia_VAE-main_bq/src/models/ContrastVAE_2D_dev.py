@@ -670,47 +670,6 @@ def bootstrap_train_normative_models_plots(
             torch.save(trained_model.state_dict(), model_save_path)
             log_and_print(f"Saved model {i+1} to {model_save_path}")
         
-        # # Generate and save visualizations (once every 5 models to avoid excessive plotting)
-        # if i % 5 == 0 or i == n_bootstraps - 1:
-        #     # Plot loss curves
-        #     plot_learning_curves(
-        #         history['train_loss'], 
-        #         history['val_loss'], 
-        #         history['kl_loss'], 
-        #         history['recon_loss'],
-        #         os.path.join(loss_dir, f"bootstrap_{i}_losses.png")
-        #     )
-            
-        #     # Get latent representations
-        #     with torch.no_grad():
-        #         trained_model.eval()
-        #         combined_data_tensor = combined_data.to(device)
-        #         features = trained_model.encoder(combined_data_tensor)
-        #         mu = trained_model.fc_mu(features)
-        #         log_var = trained_model.fc_var(features)
-        #         latent_vectors = trained_model.reparameterize(mu, log_var)
-        
-        #         # Reconstruct validation data
-        #         valid_data_tensor = valid_data.to(device)
-        #         valid_recon, _, _ = trained_model(valid_data_tensor)
-            
-        #     # # Plot latent space
-        #     # plot_latent_space(
-        #     #     latent_vectors=latent_vectors,
-        #     #     labels=combined_labels,
-        #     #     save_path=os.path.join(latent_dir, f"bootstrap_{i}_latent_tsne.png"),
-        #     #     method='tsne',
-        #     #     title=f'Bootstrap {i} (Train=0, Valid=1)'
-            # )
-            
-            # plot_latent_space(
-            #     latent_vectors=latent_vectors,
-            #     labels=combined_labels,
-            #     save_path=os.path.join(latent_dir, f"bootstrap_{i}_latent_umap.png"),
-            #     method='umap',
-            #     title=f'Bootstrap {i} (Train=0, Valid=1)'
-            # )
-            
     
     # Save all metrics to CSV
     metrics_df = pd.DataFrame(bootstrap_metrics)
@@ -950,6 +909,7 @@ def train_normative_model_plots(train_data, valid_data, model, epochs, batch_siz
     }
     
     # Create data loaders
+    log_and_print(f"Training data shape IM MODEL: {train_data.shape}")
     train_dataset = torch.utils.data.TensorDataset(train_data)
     train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     

@@ -67,7 +67,7 @@ matplotlib.use("Agg")
 
 def create_arg_parser():
     parser = argparse.ArgumentParser(description='Arguments for Normative Modeling Training')
-    parser.add_argument('--atlas_name', help='Name of the desired atlas for training.', type=str, default="all")
+    parser.add_argument('--atlas_name', help='Name of the desired atlas for training.', type=list, default=["all"])
     parser.add_argument('--num_epochs', help='Number of epochs to be trained for', type=int, default=100)
     parser.add_argument('--n_bootstraps', help='Number of bootstrap samples', type=int, default=50)
     parser.add_argument('--norm_diagnosis', help='which diagnosis is considered the "norm"', type=str, default="MDD")
@@ -89,7 +89,7 @@ def extract_measurements(subjects):
         all_measurements.append(torch.tensor(subject["measurements"]).squeeze())
     return torch.stack(all_measurements)
 
-def main(atlas_name: str, num_epochs: int, n_bootstraps: int,norm_diagnosis: str, train_ratio: float, batch_size: int, learning_rate: float, 
+def main(atlas_name: list, num_epochs: int, n_bootstraps: int,norm_diagnosis: str, train_ratio: float, batch_size: int, learning_rate: float, 
          latent_dim: int, kldiv_weight: float, save_models: bool, no_cuda: bool, seed: int, output_dir: str = None):
     ## 0. Set Up ----------------------------------------------------------
     # Set main paths
@@ -113,10 +113,12 @@ def main(atlas_name: str, num_epochs: int, n_bootstraps: int,norm_diagnosis: str
     os.makedirs(f"{save_dir}/logs", exist_ok=True)
     os.makedirs(f"{save_dir}/data", exist_ok=True)    
     # Set up configuration for the normative modeling
+    joined_atlas_name = "_".join(atlas_name)
+
 
     config = Config_2D(
         # General Parameters
-        RUN_NAME=f"NormativeVAE_{atlas_name}_{timestamp}_{norm_diagnosis}",
+        RUN_NAME=f"NormativeVAE_{joined_atlas_name}_{timestamp}_{norm_diagnosis}",
         # Input / Output Paths
         TRAIN_CSV=[TRAIN_CSV],
         TEST_CSV=[TEST_CSV],
@@ -168,7 +170,7 @@ def main(atlas_name: str, num_epochs: int, n_bootstraps: int,norm_diagnosis: str
     # Set up logging
     log_file = f"{save_dir}/logs/{timestamp}_normative_training.log"
     setup_logging(config)
-    log_and_print(f"Starting normative modeling with atlas: {atlas_name}, epochs: {num_epochs}, bootstraps: {n_bootstraps}")
+    log_and_print(f"Starting normative modeling with atlas: {joined_atlas_name}, epochs: {num_epochs}, bootstraps: {n_bootstraps}")
 
     # Save configuration
     config_dict = vars(config)
@@ -190,40 +192,23 @@ def main(atlas_name: str, num_epochs: int, n_bootstraps: int,norm_diagnosis: str
     ## 1. Load Data --------------------------------
     # Load healthy control data
     log_and_print("Loading NORM control data...")
-    if config.ATLAS_NAME != "all":
-        subjects_norm, annotations_norm, roi_names = load_mri_data_2D(
-            csv_paths=config.TRAIN_CSV,
-            data_path=config.MRI_DATA_PATH,
-            atlas_name=config.ATLAS_NAME,
-            diagnoses=[norm_diagnosis],  # Only norm controls for normative model
-            hdf5=True,
-            train_or_test="train",
-            save=True,
-            volume_type=config.VOLUME_TYPE,
-            valid_volume_types=config.VALID_VOLUME_TYPES,
-        )
-    else:
-        all_data_paths_train = get_all_data(directory=config.MRI_DATA_PATH, ext="h5")
-
-        # We assume there's a function load_mri_data_2D_all_atlases similar to the one in your original code
-        subjects_norm, annotations_norm, roi_names = load_mri_data_2D_all_atlases(
-            csv_paths=config.TRAIN_CSV,
-            data_paths=all_data_paths_train,
-            diagnoses=norm_diagnosis,
-            hdf5=True,
-            train_or_test="train",
-            volume_type=config.VOLUME_TYPE,
-            valid_volume_types=config.VALID_VOLUME_TYPES,
-        )
-
-    log_and_print("First few rows of annotations_norm:")
-    log_and_print(annotations_norm.head())
+    
+    subjects_norm, annotations_norm, roi_names = load_mri_data_2D(
+        csv_paths=config.TRAIN_CSV,
+        data_path=config.MRI_DATA_PATH,
+        atlas_name=config.ATLAS_NAME,
+        diagnoses=[norm_diagnosis],  # Only norm controls for normative model
+        hdf5=True,
+        train_or_test="train",
+        save=True,
+        volume_type=config.VOLUME_TYPE,
+        valid_volume_types=config.VALID_VOLUME_TYPES,
+    )
+   
+    
     log_and_print("Value counts of Diagnosis in annotations_norm:")
     log_and_print(annotations_norm['Diagnosis'].value_counts())
     log_and_print(f"size annotations: {len(annotations_norm)}")
-    #obs an subject_norm liegt
-    log_and_print("First few rows of subjects_norm:")
-    log_and_print(subjects_norm[:10])
     log_and_print(f"size annotations: {len(subjects_norm)}")
     print(len(subjects_norm[0]["name"]))
     
@@ -242,10 +227,6 @@ def main(atlas_name: str, num_epochs: int, n_bootstraps: int,norm_diagnosis: str
         train_ann=train_annotations_norm, 
         val_ann=valid_annotations_norm
     )
-    log_and_print(f"Number of training annotations (norm): {len(train_annotations_norm)}")
-    log_and_print(f"Number of validation annotations (norm): {len(valid_annotations_norm)}")
-    log_and_print(f"Number of training subjects (norm): {len(train_subjects_norm)}")
-    log_and_print(f"Number of validation subjects (norm): {len(valid_subjects_norm)}")
 
     train_annotations_norm.insert(1, "Data_Type", "train")
     valid_annotations_norm.insert(1, "Data_Type", "valid")
@@ -266,10 +247,7 @@ def main(atlas_name: str, num_epochs: int, n_bootstraps: int,norm_diagnosis: str
     )
 
     log_and_print(annotations)
-    # Save the processed annotations for later use
-    #annotations.to_csv(f"{save_dir}/data/processed_annotations.csv", index=False)
 
-    print("\n[DEBUG] === STARTING DATA LOADER PREPARATION ===")
     # Prepare data loaders
     train_loader_norm = process_subjects(
         subjects=train_subjects_norm,
@@ -325,19 +303,6 @@ def main(atlas_name: str, num_epochs: int, n_bootstraps: int,norm_diagnosis: str
     )
     
     log_model_ready(normative_model)
-      
-    # # Save initial model architecture visualization
-    # try:
-    #     sample_input = train_data[:1].to(device)
-    #     output, mu, log_var = normative_model(sample_input)
-    #     dot = make_dot(output, params=dict(normative_model.named_parameters()))
-    #     dot.format = 'png'
-    #     dot.render(f"{save_dir}/figures/model_architecture")
-    #     log_and_print(f"Model architecture visualization saved to {save_dir}/figures/model_architecture.png")
-    # except ImportError:
-    #     log_and_print("torchviz not available, skipping model architecture visualization")
-    
-    # Before bootstrap training, train and evaluate a single baseline model for reference
     
     log_and_print("Training baseline model before bootstrap training...")
     baseline_model, baseline_history = train_normative_model_plots(
@@ -386,7 +351,7 @@ def main(atlas_name: str, num_epochs: int, n_bootstraps: int,norm_diagnosis: str
 
     # Save training metadata
     training_metadata = {
-        "atlas_name": atlas_name,
+        "atlas_name": joined_atlas_name,
         "num_epochs": num_epochs,
         "n_bootstraps": n_bootstraps,
         "batch_size": batch_size,

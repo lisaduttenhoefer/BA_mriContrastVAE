@@ -1,1060 +1,258 @@
-import os
-from typing import List, Tuple
-import pandas as pd
-import regex as re
-import anndata as ad
-import pandas as pd
-import scanpy as sc
-from typing import List, Tuple
-import numpy as np
-import pathlib
-import torch
-import torchio as tio
-from torch.utils.data import DataLoader
-
-from utils.logging_utils import log_and_print, log_checkpoint
-
-
-def flatten_array(df: pd.DataFrame) -> np.ndarray:
-    # Converts data frame to flattened array. 
-    array = df.to_numpy()
-    flat_array = array.flatten()
-    return flat_array
-
-
-def normalize_and_scale_df(df: pd.DataFrame, ticv_column=None) -> pd.DataFrame:
+def extract_measurements(subjects):
     """
-    Normalizes brain region volumes using the described preprocessing approach:
-    1. Calculate relative volumes by dividing by total intracranial volume (if provided)
-    2. Perform robust normalization: (x - median) / IQR for each brain region
-    """
-    df_copy = df.copy()
+    Extrahiere die Messwerte aus einer Liste von Subjekten.
+    Modifiziert, um das richtige Format für das Modell zu erzeugen.
     
-    if ticv_column is not None:
-        ticv_values = df_copy[ticv_column]
-        if ticv_column in df_copy.columns:
-            df_copy = df_copy.drop(columns=[ticv_column])
-        for column in df_copy.columns:
-            df_copy[column] = df_copy[column] / ticv_values
-
-    # Use a dictionary to store normalized columns
-    normalized_data = {}
-
-    for column in df_copy.columns:
-        median_value = df_copy[column].median()
-        q1 = df_copy[column].quantile(0.25)
-        q3 = df_copy[column].quantile(0.75)
-        iqr = q3 - q1
-
-        if iqr == 0:
-            normalized_data[column] = pd.Series(0, index=df_copy.index)
-        else:
-            normalized_data[column] = (df_copy[column] - median_value) / iqr
-
-    # Create the final normalized DataFrame at once
-    normalized_df = pd.DataFrame(normalized_data, index=df_copy.index)
-
-    return normalized_df
-
-
-def get_all_data(directory: str, ext: str = "h5") -> list:
-    data_paths = list(pathlib.Path(directory).rglob(f"*.{ext}"))
-    return data_paths
-
-
-def get_atlas(path: pathlib.PosixPath) -> str:
-    stem = path.stem
-    match = re.search(r"_(.*)", stem)
-    if match:
-        atlas = match.group(1)
-    return atlas
-
-# def combine_dfs(paths: list):
-#     # Combines any number of csv files to a single pandas DataFrame, keeping only shared column indices. 
-#     for i in range(1,len(paths)):
-#         if i == 1: 
-#             joined_df = pd.read_csv(paths[i-1], header=[0], index_col=0)
-#             next_df = pd.read_csv(paths[i], header=[0], index_col=0)
-#             joined_df = pd.concat([joined_df, next_df], join="inner")  # Parameter "inner" keeps only the shared column indices.
-#         else:
-#             next_df = pd.read_csv(paths[i], header=[0], index_col=0)
-#             joined_df = pd.concat([joined_df, next_df], join="inner")
-#     return joined_df
-
-def combine_dfs(paths: list):
-    # Combines any number of csv files to a single pandas DataFrame, keeping only shared column indices. 
-    
-    if len(paths) > 1: 
-        for i in range(1,len(paths)):
-            if i == 1: 
-                joined_df = pd.read_csv(paths[i-1], header=[0])
-                next_df = pd.read_csv(paths[i], header=[0])
-                joined_df = pd.concat([joined_df, next_df], join="inner")  # Parameter "inner" keeps only the shared column indices.
-            else:
-                next_df = pd.read_csv(paths[i], header=[0])
-                joined_df = pd.concat([joined_df, next_df], join="inner")
-    else: 
-        joined_df = pd.read_csv(paths[0], header=[0])
-    return joined_df
-
-
-def read_hdf5_to_df(filepath: str):
-    if not os.path.exists(filepath):
-        print(f"File {filepath} does not exist")
-        return None
-    try:
-        return pd.read_hdf(filepath, key='data') #atlas_data
-    except Exception as e:
-        print(f"Error reading {filepath}: {e}")
-        return None
-
-
-def read_hdf5_to_df_t(filepath: str):
-    if not os.path.exists(filepath):
-        print(f"File {filepath} does not exist")
-        return None
-    try:
-        return pd.read_hdf(filepath, key='data') #atlas_data
-    except Exception as e:
-        print(f"Error reading {filepath}: {e}")
-        return None
-
-
-def train_val_split_annotations(
-    # The annotations dataframe that you want to split into a train and validation part
-    annotations: pd.DataFrame,
-    # The proportion of the data that should be in the training set (the rest is in the test set)
-    train_proportion: float = 0.8,
-    # The diagnoses you want to include in the split, defaults to all
-    diagnoses: List[str] = None,
-    # The datasets you want to include in the split, defaults to all
-    datasets: List[str] = None,
-    # The random seed for reproducibility
-    seed: int = 123,
-) -> Tuple[pd.DataFrame, pd.DataFrame]:
-
-    # Initialize empty dataframes
-    train = pd.DataFrame()
-    valid = pd.DataFrame()
-
-    # If no diagnoses are specified, use all diagnoses in the annotations
-    if diagnoses is None:
-        diagnoses = annotations["Diagnosis"].unique()
-
-    # If no datasets are specified, use all datasets in the annotations
-    if datasets is None:
-        datasets = annotations["Dataset"].unique()
-
-    # For each diagnosis, dataset and sex, take a random sample of the data and split it into train and test
-    for diagnosis in diagnoses:
-        for dataset in datasets:
-            for sex in ["Female", "Male"]:
-                # subset to the current cohort
-                dataset_annotations = annotations[
-                    (annotations["Diagnosis"] == diagnosis)
-                    & (annotations["Dataset"] == dataset)
-                    & (annotations["Sex"] == sex)
-                ]
-                # shuffle the data
-                dataset_annotations = dataset_annotations.sample(
-                    frac=1, random_state=seed
-                )
-                # split the data train_proportion of the way through (usually 80%)
-                split = round(len(dataset_annotations) * train_proportion)
-
-                # add the split data to the train and test dataframes
-                train = pd.concat(
-                    [train, dataset_annotations[:split]], ignore_index=True
-                )
-                valid = pd.concat([valid, dataset_annotations[split:]], ignore_index=True)
-
-    print(f"training set after train/val/split:{train.shape}")
-    print(f"validation set after train/val/split:{valid.shape}")
-
-    # return the split annotations. They have no overlap.
-    return train, valid
-
-def train_val_split_subjects(
-    # The list of patients that should be split according to the prior train_split
-    subjects: List[dict], 
-    # Training annotations
-    train_ann: pd.DataFrame, 
-    # Validation annotations
-    val_ann: pd.DataFrame
-) -> Tuple[List, List]:
-    
-    train_files = list(train_ann["Filename"])
-    valid_files = list(val_ann["Filename"])
-
-    print(f"train_files:{len(train_files)}")
-    print(f"valid_files:{len(valid_files)}")
-
-    train_subjects = []
-    valid_subjects = []
-    print(f"[DEBUG] Number of training annotations: {len(train_files)}")
-    print(f"[DEBUG] Number of validation annotations: {len(valid_files)}")
-
-    for subject in subjects:
-
-        if subject["name"] in train_files:
-            train_subjects.append(subject)
-
-        elif subject["name"] in valid_files:
-            valid_subjects.append(subject)
-            
-        else: 
-            print(f"Filename {subject['name']} not found in annotations.")
-
-    return train_subjects, valid_subjects
-
-
-
-class CustomDataset_2D():  
-    # Create Datasets that can then be converted into DataLoader objects
-    def __init__(self, subjects):
-        self.subjects = subjects
-
-    def __len__(self):
-        return len(self.subjects)
-
-    def __getitem__(self, idx):
-        if torch.is_tensor(idx):
-            idx = idx.tolist()
-
-        measurements = self.subjects[idx]["measurements"]
-        labels = self.subjects[idx]["labels"]
-
-        labels_df = pd.DataFrame(labels)
-        labels_arr = labels_df.values
-        names = self.subjects[idx]["name"]
-
-        measurements = torch.as_tensor(measurements, dtype=torch.float32)  # Ensure this is float32, as the weights of the model are initialized.
-        labels = torch.as_tensor(labels_arr, dtype=torch.float32)  # float32 required for linear operations!
-
-        return measurements, labels, names
-
-#################
-def load_mri_data_2D(
-    # The path to the directory where the MRI data is stored (.csv file formats)
-    data_path: str,
-    # Name of the atlas that should be used for training.
-    atlas_name: str,
-    # The path to the CSV metadata files
-    csv_paths: list = None,
-    # The annotations DataFrame that contains the filenames of the MRI data and the diagnoses and covariates
-    annotations: pd.DataFrame = None,
-    # The diagnoses that you want to include in the data loading, defaults to all
-    diagnoses: List[str] = None,
-    covars: List[str] = [],
-    # Are the files of raw extracted xml data in the .h5 (True) or .csv (False) format?
-    hdf5: bool = True,
-    # Intended usage for the currently loaded data.
-    train_or_test: str = "train",
-    # Should the normalized and scaled file be saved?
-    save: bool = False,
-    # Which volume type to use for analysis (Vgm, Vwm, csf, or all)
-    volume_type: str = "all",
-    # List of valid volume types that can be specified
-    valid_volume_types: List[str] = ["Vgm", "Vwm", "csf"],
-) -> Tuple:
-
-    atlas_data_path = f"{data_path}/Aggregated_{atlas_name}.h5"
-    #atlas_data_path = f"/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data/train_xml_data/Aggregated_cobra.h5"
-
-    # If the CSV path is provided, check if the file exists, make sure that the annotations are not provided
-    if csv_paths is not None:
-        for csv_path in csv_paths: 
-            assert os.path.isfile(csv_path), f"CSV file '{csv_path}' not found"
-            assert annotations is None, "Both CSV and annotations provided"
-
-        # Initialize the data overview DataFrame
-        data_overview = combine_dfs(csv_paths)
-
-    # If the annotations are provided, make sure that they are a pandas DataFrame, and that the CSV path is not provided
-    if annotations is not None:
-        assert isinstance(
-            annotations, pd.DataFrame
-        ), "Annotations must be a pandas DataFrame"
-        assert csv_paths is None, "Both CSV and annotations provided"
-
-        # Initialize the data overview DataFrame
-        data_overview = annotations
-
-    # If no diagnoses are provided, use all diagnoses in the data overview
-    # if diagnoses is None:
-    #     diagnoses = data_overview["Diagnosis"].unique().tolist()
-    
-    # If the covariates are not a list, make them a list
-    if not isinstance(covars, list):
-        covars = [covars]
-
-    # If the diagnoses are not a list, make them a list
-    if not isinstance(diagnoses, list):
-        diagnoses = [diagnoses]
-    
-    # Set all the variables that will be one-hot encoded
-    variables = ["Diagnosis"] + covars
-
-    # Filter unwanted diagnoses
-    
-    # data_overview = data_overview[data_overview["Diagnosis"].isin(diagnoses)]
-    # print(f"[INFO] Number of samples after diagnosis filtering: {len(data_overview)}")
-    # print("[INFO] Sample count per diagnosis after filtering:")
-    # print(data_overview["Diagnosis"].value_counts())
-
-    # Entferne die unnötige Spalte, falls vorhanden
-    if "Unnamed: 0" in data_overview.columns:
-        data_overview = data_overview.drop(columns=["Unnamed: 0"])
-
-    print(f"[INFO] Number of samples in metadata: {len(data_overview)}")
-    print(f"[INFO] Number of samples after column dropping: {len(data_overview)}")
-    data_overview = data_overview[["Filename", "Dataset", "Diagnosis" , "Age", "Sex", "Usage_original", "Sex_int"]]
-
-    # produce one hot coded labels for each variable
-    one_hot_labels = {}
-    for var in variables:
-        # check that the variables is in the data overview
-        if var not in data_overview.columns:
-            raise ValueError(f"Column '{var}' not found in CSV file or annotations")
-
-        # one hot encode the variable
-        one_hot_labels[var] = pd.get_dummies(data_overview[var], dtype=float)
-
-    # For each subject, collect MRI data and variable data in the Subject object
-    subjects = []
-
-    if hdf5 == True: 
-        data = read_hdf5_to_df(filepath=atlas_data_path)
-    else:
-        data = pd.read_csv(atlas_data_path, header=[0, 1], index_col=0)
-
-    # Extract ROI names from index (rows) with the specified volume type
-    roi_names = []
-    # Data has rows as ROIs and columns as (Patient-ID, volume-type)
-    if isinstance(data.index, pd.Index):
-        # Get all ROI names from the index
-        base_roi_names = data.index.tolist()
+    Args:
+        subjects: Liste von subject-Dictionaries mit 'measurements'-Feld
         
-        # Format ROI names with the specified volume type
-        if volume_type == "all":
-            # For "all", include all volume types for each ROI
-            for roi in base_roi_names:
-                for vt in valid_volume_types:
-                    roi_names.append(f"{roi}_{vt}")
-        else:
-            # For specific volume type, only include that type
-            roi_names = [f"{roi}_{volume_type}" for roi in base_roi_names]
-
-    # Validate volume_type parameter
-    if volume_type != "all" and volume_type not in valid_volume_types:
-        raise ValueError(f"Invalid volume_type: {volume_type}. Must be one of: {valid_volume_types} or 'all'")
-    
-    # Filter data based on volume_type if needed
-    if volume_type != "all":
-        # Extract only the columns with the specified volume type from the MultiIndex
-        filtered_columns = []
-        for col in data.columns:
-            if isinstance(col, tuple) and len(col) > 1 and col[1] == volume_type:
-                filtered_columns.append(col)
-            elif not isinstance(col, tuple) and volume_type in col:
-                # Handle case where MultiIndex isn't properly formed but column name contains volume type
-                filtered_columns.append(col)
-        
-        data = data[filtered_columns]
-
-    # if train_or_test == "train":
-    #     data.to_csv(f"/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data/train_processed_data/Proc_{atlas_name}.csv")
-    #     all_file_names = data.columns
-    # else:
-    #     data.to_csv(f"/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data/test_processed_data/Proc_{atlas_name}.csv")
-    #     all_file_names = data.columns        
-        
-    # data.set_index("Filename", inplace=True)
-
-    data = normalize_and_scale_df(data)
-
-    if save == True:
-        #atlas_name = data_path.stem
-        volume_suffix = "_all" if volume_type == "all" else f"_{volume_type}"
-        data.to_csv(f"data/proc_extracted_xml_data/Proc_{atlas_name}{volume_suffix}_{train_or_test}.csv")
-        
-    all_file_names = data.columns
-
-    for index, row in data_overview.iterrows():
-        subject = {} 
-        
-        if not row["Filename"] in all_file_names:
-            continue
-
-        # Format correct filename
-        if row["Filename"].endswith(".nii") or row["Filename"].endswith(".nii.gz"):
-            pre_file_name = row["Filename"]
-            match_no_ext = re.search(r"([^/\\]+)\.[^./\\]*$", pre_file_name)  # Extract file stem
-            if match_no_ext:
-                file_name = match_no_ext.group(1)
-        else:
-            file_name = row["Filename"]
-
-        patient_data = data[file_name]
-      
-        flat_patient_data = flatten_array(patient_data).tolist()
-
-        subject["name"] = file_name
-        subject["measurements"] = flat_patient_data
-        subject["labels"] = {}
-
-        for var in variables:
-            subject["labels"][var] = one_hot_labels[var].iloc[index].to_numpy().tolist()
-
-        # Store Subject in our list
-        subjects.append(subject)
-
-    # Return the list of subjects, the filtered annotations, and ROI names
-    return subjects, data_overview, roi_names
-
-def load_mri_data_2D_all_atlases(
-    # The path to the directory where the MRI data is stored (.csv file formats)
-    data_paths: List[str],
-    # Names of the atlases that should be used for training
-    atlas_names: List[str] = None,
-    # The path to the CSV metadata files
-    csv_paths: List[str] = None,
-    # The annotations DataFrame that contains the filenames of the MRI data and the diagnoses and covariates
-    annotations: pd.DataFrame = None,
-    # The diagnoses that you want to include in the data loading, defaults to all
-    diagnoses: List[str] = None,
-    # Covariates to include
-    covars: List[str] = [],
-    # Are the files of raw extracted xml data in the .h5 (True) or .csv (False) format?
-    hdf5: bool = True,
-    # Intended usage for the currently loaded data.
-    train_or_test: str = "train",
-    # Should the normalized and scaled file be saved?
-    save: bool = False,
-    # Which volume type to use for analysis (Vgm, Vwm, csf, or all)
-    volume_type: str = "all",
-    # List of valid volume types that can be specified
-    valid_volume_types: List[str] = ["Vgm", "Vwm", "csf"],
-) -> Tuple:
-    """
-    Load and process MRI data from multiple atlases.
-    
     Returns:
-        Tuple: A tuple containing the list of subject data, filtered annotations DataFrame, and list of ROI names
+        torch.Tensor: Tensor mit allen Messwerten in korrekter Form
     """
-    # Validate volume_type parameter
-    if volume_type != "all" and volume_type not in valid_volume_types:
-        raise ValueError(f"Invalid volume_type: {volume_type}. Must be one of: {valid_volume_types} or 'all'")
-
-    # If the CSV path is provided, check if the file exists, make sure that the annotations are not provided
-    if csv_paths is not None:
-        for csv_path in csv_paths: 
-            assert os.path.isfile(csv_path), f"CSV file '{csv_path}' not found"
-            assert annotations is None, "Both CSV and annotations provided"
-
-        # Initialize the data overview DataFrame
-        data_overview = combine_dfs(csv_paths)
-
-    # If the annotations are provided, make sure that they are a pandas DataFrame, and that the CSV path is not provided
-    if annotations is not None:
-        assert isinstance(
-            annotations, pd.DataFrame
-        ), "Annotations must be a pandas DataFrame"
-        assert csv_paths is None, "Both CSV and annotations provided"
-
-        # Initialize the data overview DataFrame
-        data_overview = annotations
-
-    # If no diagnoses are provided, use all diagnoses in the data overview
-    if diagnoses is None:
-        diagnoses = data_overview["Diagnosis"].unique().tolist()
-
-    # If the covariates are not a list, make them a list
-    if not isinstance(covars, list):
-        covars = [covars]
-
-    # If the diagnoses are not a list, make them a list
-    if not isinstance(diagnoses, list):
-        diagnoses = [diagnoses]
+    print(f"[DEBUG] extract_measurements: Eingabe hat {len(subjects)} Subjekte")
     
-    # Set all the variables that will be one-hot encoded
-    variables = ["Diagnosis"] + covars
-
-    # Filter unwanted diagnoses
-    #data_overview = data_overview[data_overview["Diagnosis"].isin(diagnoses)]
-    #print(f"[INFO] Number of samples after diagnosis filtering: {len(data_overview)}")
-    print(f"[INFO] Number of samples in metadata: {len(data_overview)}")
-    print("[INFO] Sample count per diagnosis after filtering:")
-    print(data_overview["Diagnosis"].value_counts())
+    if len(subjects) == 0:
+        print("[WARNUNG] extract_measurements: Leere Subjektliste!")
+        return torch.tensor([])
     
-    # Entferne die unnötige Spalte, falls vorhanden
-    if "Unnamed: 0" in data_overview.columns:
-        data_overview = data_overview.drop(columns=["Unnamed: 0"])
+    # Prüfe das erste Element zur Diagnose
+    first_subj = subjects[0]
+    if 'measurements' not in first_subj:
+        print(f"[FEHLER] Subjekt hat kein 'measurements'-Feld! Verfügbare Schlüssel: {first_subj.keys()}")
+        raise KeyError("'measurements' nicht in Subjekt vorhanden")
     
-    data_overview = data_overview[["Filename", "Dataset", "Diagnosis", "Age", "Sex", "Usage_original", "Sex_int"]]
-    print(f"[INFO] Number of samples after column dropping: {len(data_overview)}")
-
-    # produce one hot coded labels for each variable
-    one_hot_labels = {}
-    for var in variables:
-        # check that the variables is in the data overview
-        if var not in data_overview.columns:
-            raise ValueError(f"Column '{var}' not found in CSV file or annotations")
-
-        # one hot encode the variable
-        one_hot_labels[var] = pd.get_dummies(data_overview[var], dtype=float)
-
-    # For each subject, collect MRI data and variable data in the Subject object
-    subjects = {}
-    all_roi_names = {}  # Dictionary to store ROI names by atlas
-    all_roi_values_flat = []
-
-    for data_path in data_paths:
-        atlas_name = os.path.basename(data_path).replace("Aggregated_", "").replace(".h5", "")
-        
-        if hdf5:
-            data = read_hdf5_to_df(filepath=data_path)
-        else:
-            data = pd.read_csv(data_path, header=[0, 1], index_col=0)
-
-        # Get the column names
-        patient_ids_multiindex = data.columns.get_level_values(0)
-        unique_patient_ids = patient_ids_multiindex.unique().tolist()
-        print(f"[DEBUG] Unique patient IDs from {os.path.basename(data_path)}: {unique_patient_ids[:5]} ... (total: {len(unique_patient_ids)})")
-
-        # Extract ROI names for this specific atlas
-        base_roi_names = data.index.tolist()
-        atlas_roi_names = []
-        
-        # # Format ROI names with the specified volume type
-        # if volume_type == "all":
-        #     # For "all", include all volume types for each ROI
-        #     for roi in base_roi_names:
-        #         for vt in valid_volume_types:
-        #             atlas_roi_names.append(f"{roi}_{vt}")
-        # else:
-        #     # For specific volume type, only include that type
-        #     atlas_roi_names = [f"{roi}_{volume_type}" for roi in base_roi_names]
-        
-        # all_roi_names[atlas_name] = atlas_roi_names
-        # all_roi_values_flat.extend(atlas_roi_names)
-        
-        # Filter data based on volume_type if needed
-        data_filtered = pd.DataFrame()
-        if volume_type == "all":
-            data_filtered = data.copy()
-        else:
-            for col in data.columns:
-                if col[1] == volume_type:
-                    if data_filtered.empty:
-                        data_filtered = data[col].copy()
-                        data_filtered.name = col
-                        data_filtered = pd.DataFrame(data_filtered)
-                    else:
-                        data_filtered[col] = data[col]
-        all_roi_names[atlas_name] = atlas_roi_names
-        all_roi_values_flat.extend(atlas_roi_names)
-        
-        data_normalized = normalize_and_scale_df(data_filtered)
-        all_processed_patient_ids = data_normalized.columns.get_level_values(0).unique().tolist()
-
-        if save:
-            volume_suffix = "_all" if volume_type == "all" else f"_{volume_type}"
-            data.to_csv(f"data/proc_extracted_xml_data/Proc_{atlas_name}{volume_suffix}_{train_or_test}.csv")
+    first_measurements = first_subj['measurements']
+    print(f"[DEBUG] Typ des ersten measurements: {type(first_measurements)}")
+    
+    if isinstance(first_measurements, list):
+        print(f"[DEBUG] Länge der measurements-Liste im ersten Subjekt: {len(first_measurements)}")
+        # Wenn list of lists, näheres untersuchen
+        if len(first_measurements) > 0 and isinstance(first_measurements[0], list):
+            print(f"[DEBUG] Innere Liste Länge: {len(first_measurements[0])}")
+    
+    # Sammle alle Messwerte
+    all_measurements = []
+    
+    for i, subject in enumerate(subjects):
+        try:
+            measurements = subject['measurements']
             
-        all_file_names = data.columns
-        print(f"shape normalisierter dataframe:{all_file_names.shape}")
-        for index, row in data_overview.iterrows():
-
-
-
-
+            # Prüfe Typ und konvertiere wenn nötig
+            if isinstance(measurements, list):
+                # Prüfe auf verschachtelte Listen und ihre Dimensionen
+                if len(measurements) > 0 and isinstance(measurements[0], list):
+                    # Verschachtelte Liste: [ROIs][features] -> umformen zu flacher Liste
+                    # Das Modell erwartet [samples, features], nicht [samples, ROIs, features]
+                    # Reshape: von [ROIs, features] zu [features*ROIs]
+                    print(f"[DEBUG] Subjekt {i}: Reshaping von [ROIs, features] zu flacher Form...")
+                    
+                    # Option 1: Direkt Flatten der 2D-Liste zu 1D
+                    flat_measurements = []
+                    for roi_features in measurements:
+                        flat_measurements.extend(roi_features)
+                    measurements = torch.tensor(flat_measurements, dtype=torch.float32)
+                    
+                    # Option 2: Behalte 2D-Struktur bei, wandle sie nur um
+                    # measurements = torch.tensor(measurements, dtype=torch.float32)
+                    # measurements = measurements.view(-1)  # Flatten zu 1D
+                else:
+                    measurements = torch.tensor(measurements, dtype=torch.float32)
+            elif isinstance(measurements, np.ndarray):
+                measurements = torch.from_numpy(measurements).float()
+                # Flatten wenn mehrdimensional
+                if len(measurements.shape) > 1:
+                    measurements = measurements.reshape(-1)
+            elif isinstance(measurements, torch.Tensor):
+                # Flatten wenn mehrdimensional
+                if len(measurements.shape) > 1:
+                    measurements = measurements.reshape(-1)
+            else:
+                raise TypeError(f"Unerwarteter Typ für measurements: {type(measurements)}")
             
-            if row["Filename"] not in all_file_names:
-                print(f"[DEBUG] Filename from data_overview not in all_file_names: {row['Filename']}") # ADDED PRINT
-                continue
-
-            # Format correct filename
-            if row["Filename"].endswith(".nii") or row["Filename"].endswith(".nii.gz"):
-                pre_file_name = row["Filename"]
-                match_no_ext = re.search(r"([^/\\]+)\.[^./\\]*$", pre_file_name)  # Extract file stem
-                if match_no_ext:
-                    file_name = match_no_ext.group(1)
-            else:
-                file_name = row["Filename"]
-
-            patient_data = data[file_name]
-            flat_patient_data = flatten_array(patient_data).tolist()
-
-            if file_name not in subjects:
-                subjects[file_name] = {
-                    "name": file_name,
-                    "measurements": flat_patient_data,
-                    "labels": {}
-                }
-                
-                for var in variables:
-                    subjects[file_name]["labels"][var] = one_hot_labels[var].iloc[index].to_numpy().tolist()
-            else:
-                # Append data from additional atlases to existing subject data
-                subjects[file_name]["measurements"] += flat_patient_data
-
-    # Return the list of subjects, the filtered annotations, and the ROI names dictionary
-    return list(subjects.values()), data_overview, all_roi_values_flat
-
-#################
-
-def load_mri_data_2D_OLD(
-    # The path to the directory where the MRI data is stored (.csv file formats)
-    data_path: str,
-    # Name of the atlas that should be used for training.
-    atlas_name: str,
-    # The path to the CSV metadata files
-    csv_paths: list = None,
-    # The annotations DataFrame that contains the filenames of the MRI data and the diagnoses and covariates
-    annotations: pd.DataFrame = None,
-    # The diagnoses that you want to include in the data loading, defaults to all
-    diagnoses: List[str] = None,
-    covars: List[str] = [],
-    # Are the files of raw extracted xml data in the .h5 (True) or .csv (False) format?
-    hdf5: bool = True,
-    # Intended usage for the currently loaded data.
-    train_or_test: str = "train",
-    # Should the normalized and scaled file be saved?
-    save: bool = False,
-    # Which volume type to use for analysis (Vgm, Vwm, csf, or all)
-    volume_type: str = "all",
-    # List of valid volume types that can be specified
-    valid_volume_types: List[str] = ["Vgm", "Vwm", "csf"],
-) -> Tuple:
-
-    atlas_data_path = f"{data_path}/Aggregated_{atlas_name}.h5"
-    #atlas_data_path = f"/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data/train_xml_data/Aggregated_cobra.h5"
-
-    # If the CSV path is provided, check if the file exists, make sure that the annotations are not provided
-    if csv_paths is not None:
-        for csv_path in csv_paths: 
-            assert os.path.isfile(csv_path), f"CSV file '{csv_path}' not found"
-            assert annotations is None, "Both CSV and annotations provided"
-
-        # Initialize the data overview DataFrame
-        data_overview = combine_dfs(csv_paths)
-
-    # If the annotations are provided, make sure that they are a pandas DataFrame, and that the CSV path is not provided
-    if annotations is not None:
-        assert isinstance(
-            annotations, pd.DataFrame
-        ), "Annotations must be a pandas DataFrame"
-        assert csv_paths is None, "Both CSV and annotations provided"
-
-        # Initialize the data overview DataFrame
-        data_overview = annotations
-
-    # If no diagnoses are provided, use all diagnoses in the data overview
-    if diagnoses is None:
-        diagnoses = data_overview["Diagnosis"].unique().tolist()
-    
-    # If the covariates are not a list, make them a list
-    if not isinstance(covars, list):
-        covars = [covars]
-
-    # If the diagnoses are not a list, make them a list
-    if not isinstance(diagnoses, list):
-        diagnoses = [diagnoses]
-    
-    # Set all the variables that will be one-hot encoded
-    variables = ["Diagnosis"] + covars
-
-    # Filter unwanted diagnoses
-    
-    data_overview = data_overview[data_overview["Diagnosis"].isin(diagnoses)]
-    print(f"[INFO] Number of samples after diagnosis filtering: {len(data_overview)}")
-    print("[INFO] Sample count per diagnosis after filtering:")
-    print(data_overview["Diagnosis"].value_counts())
-    data_overview = data_overview.drop(columns=['Unnamed: 0'])
-    print(f"[INFO] Number of samples after column dropping: {len(data_overview)}")
-    data_overview = data_overview[["Filename", "Dataset", "Diagnosis" , "Age", "Sex", "Usage_original", "Sex_int"]]
-
-    # produce one hot coded labels for each variable
-    one_hot_labels = {}
-    for var in variables:
-        # check that the variables is in the data overview
-        if var not in data_overview.columns:
-            raise ValueError(f"Column '{var}' not found in CSV file or annotations")
-
-        # one hot encode the variable
-        one_hot_labels[var] = pd.get_dummies(data_overview[var], dtype=float)
-
-    # For each subject, collect MRI data and variable data in the Subject object
-    subjects = []
-
-    if hdf5 == True: 
-        data = read_hdf5_to_df(filepath=atlas_data_path)
-    else:
-        data = pd.read_csv(atlas_data_path, header=[0, 1], index_col=0)
-
-    # Validate volume_type parameter
-    if volume_type != "all" and volume_type not in valid_volume_types:
-        raise ValueError(f"Invalid volume_type: {volume_type}. Must be one of: {valid_volume_types} or 'all'")
-    
-    # Filter data based on volume_type if needed
-    if volume_type != "all":
-        # Extract only the columns with the specified volume type from the MultiIndex
-        filtered_columns = []
-        for col in data.columns:
-            if isinstance(col, tuple) and len(col) > 1 and col[1] == volume_type:
-                filtered_columns.append(col)
-            elif not isinstance(col, tuple) and volume_type in col:
-                # Handle case where MultiIndex isn't properly formed but column name contains volume type
-                filtered_columns.append(col)
-        
-        data = data[filtered_columns]
-
-    # if train_or_test == "train":
-    #     data.to_csv(f"/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data/train_processed_data/Proc_{atlas_name}.csv")
-    #     all_file_names = data.columns
-    # else:
-    #     data.to_csv(f"/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data/test_processed_data/Proc_{atlas_name}.csv")
-    #     all_file_names = data.columns        
-        
-    # data.set_index("Filename", inplace=True)
-
-    data = normalize_and_scale_df(data)
-
-    if save == True:
-        #atlas_name = data_path.stem
-        volume_suffix = "_all" if volume_type == "all" else f"_{volume_type}"
-        data.to_csv(f"data/proc_extracted_xml_data/Proc_{atlas_name}{volume_suffix}_{train_or_test}.csv")
-        
-    all_file_names = data.columns
-
-    for index, row in data_overview.iterrows():
-        subject = {} 
-        
-        if not row["Filename"] in all_file_names:
-            continue
-
-        # Format correct filename
-        if row["Filename"].endswith(".nii") or row["Filename"].endswith(".nii.gz"):
-            pre_file_name = row["Filename"]
-            match_no_ext = re.search(r"([^/\\]+)\.[^./\\]*$", pre_file_name)  # Extract file stem
-            if match_no_ext:
-                file_name = match_no_ext.group(1)
-        else:
-            file_name = row["Filename"]
-
-        patient_data = data[file_name]
-      
-        flat_patient_data = flatten_array(patient_data).tolist()
-
-        subject["name"] = file_name
-        subject["measurements"] = flat_patient_data
-        subject["labels"] = {}
-
-        for var in variables:
-            subject["labels"][var] = one_hot_labels[var].iloc[index].to_numpy().tolist()
-
-        # Store Subject in our list
-        subjects.append(subject)
-
-    # Return the list of subjects and the filtered annotations
-    return subjects, data_overview
-
-def load_mri_data_2D_all_atlases_OLD(
-    # The path to the directory where the MRI data is stored (.csv file formats)
-    data_paths: List[str],
-    # Names of the atlases that should be used for training
-    atlas_names: List[str] = None,
-    # The path to the CSV metadata files
-    csv_paths: List[str] = None,
-    # The annotations DataFrame that contains the filenames of the MRI data and the diagnoses and covariates
-    annotations: pd.DataFrame = None,
-    # The diagnoses that you want to include in the data loading, defaults to all
-    diagnoses: List[str] = None,
-    # Covariates to include
-    covars: List[str] = [],
-    # Are the files of raw extracted xml data in the .h5 (True) or .csv (False) format?
-    hdf5: bool = True,
-    # Intended usage for the currently loaded data.
-    train_or_test: str = "train",
-    # Should the normalized and scaled file be saved?
-    save: bool = False,
-    # Which volume type to use for analysis (Vgm, Vwm, csf, or all)
-    volume_type: str = "all",
-    # List of valid volume types that can be specified
-    valid_volume_types: List[str] = ["Vgm", "Vwm", "csf"],
-) -> Tuple:
-    """
-    Load and process MRI data from multiple atlases.
-    
-    Returns:
-        Tuple: A tuple containing the list of subject data and filtered annotations DataFrame
-    """
-    # Validate volume_type parameter
-    if volume_type != "all" and volume_type not in valid_volume_types:
-        raise ValueError(f"Invalid volume_type: {volume_type}. Must be one of: {valid_volume_types} or 'all'")
-
-    # If the CSV path is provided, check if the file exists, make sure that the annotations are not provided
-    if csv_paths is not None:
-        for csv_path in csv_paths: 
-            assert os.path.isfile(csv_path), f"CSV file '{csv_path}' not found"
-            assert annotations is None, "Both CSV and annotations provided"
-
-        # Initialize the data overview DataFrame
-        data_overview = combine_dfs(csv_paths)
-
-    # If the annotations are provided, make sure that they are a pandas DataFrame, and that the CSV path is not provided
-    if annotations is not None:
-        assert isinstance(
-            annotations, pd.DataFrame
-        ), "Annotations must be a pandas DataFrame"
-        assert csv_paths is None, "Both CSV and annotations provided"
-
-        # Initialize the data overview DataFrame
-        data_overview = annotations
-
-    # If no diagnoses are provided, use all diagnoses in the data overview
-    if diagnoses is None:
-        diagnoses = data_overview["Diagnosis"].unique().tolist()
-
-    # If the covariates are not a list, make them a list
-    if not isinstance(covars, list):
-        covars = [covars]
-
-    # If the diagnoses are not a list, make them a list
-    if not isinstance(diagnoses, list):
-        diagnoses = [diagnoses]
-    
-    # Set all the variables that will be one-hot encoded
-    variables = ["Diagnosis"] + covars
-
-    # Filter unwanted diagnoses
-    data_overview = data_overview[data_overview["Diagnosis"].isin(diagnoses)]
-    print(f"[INFO] Number of samples after diagnosis filtering: {len(data_overview)}")
-    print("[INFO] Sample count per diagnosis after filtering:")
-    print(data_overview["Diagnosis"].value_counts())
-    
-    data_overview = data_overview.drop(columns=['Unnamed: 0'])
-    data_overview = data_overview[["Filename", "Dataset", "Diagnosis", "Age", "Sex", "Usage_original", "Sex_int"]]
-    print(f"[INFO] Number of samples after column dropping: {len(data_overview)}")
-
-    # produce one hot coded labels for each variable
-    one_hot_labels = {}
-    for var in variables:
-        # check that the variables is in the data overview
-        if var not in data_overview.columns:
-            raise ValueError(f"Column '{var}' not found in CSV file or annotations")
-
-        # one hot encode the variable
-        one_hot_labels[var] = pd.get_dummies(data_overview[var], dtype=float)
-
-    # For each subject, collect MRI data and variable data in the Subject object
-    subjects = {}
-    
-    for data_path in data_paths:
-        atlas_name = os.path.basename(data_path).replace("Aggregated_", "").replace(".h5", "")
-        
-        if hdf5:
-            data = read_hdf5_to_df(filepath=data_path)
-        else:
-            data = pd.read_csv(data_path, header=[0, 1], index_col=0)
-        
-        # Filter data based on volume_type if needed
-        if volume_type != "all":
-            # Extract only the columns with the specified volume type from the MultiIndex
-            filtered_columns = []
-            for col in data.columns:
-                if isinstance(col, tuple) and len(col) > 1 and col[1] == volume_type:
-                    filtered_columns.append(col)
-                elif not isinstance(col, tuple) and volume_type in col:
-                    # Handle case where MultiIndex isn't properly formed but column name contains volume type
-                    filtered_columns.append(col)
+            all_measurements.append(measurements)
             
-            data = data[filtered_columns]
-        
-        data = normalize_and_scale_df(data)
-        
-        if save:
-            volume_suffix = "_all" if volume_type == "all" else f"_{volume_type}"
-            data.to_csv(f"data/proc_extracted_xml_data/Proc_{atlas_name}{volume_suffix}_{train_or_test}.csv")
+            # Diagnostik bei ersten paar Subjekten
+            if i < 3:
+                print(f"[DEBUG] Subjekt {i}: measurements shape nach Umformung: {measurements.shape}")
             
-        all_file_names = data.columns
+        except Exception as e:
+            print(f"[FEHLER] Bei Subjekt {i}: {e}")
+            raise
+    
+    # Prüfe ob alle Formen konsistent sind
+    first_shape = all_measurements[0].shape
+    inconsistent_shapes = [i for i, m in enumerate(all_measurements) if m.shape != first_shape]
+    if inconsistent_shapes:
+        print(f"[WARNUNG] Inkonsistente Formen gefunden bei Subjekten: {inconsistent_shapes}")
+        for i in inconsistent_shapes[:5]:  # Zeige nur die ersten 5
+            print(f"  Subjekt {i}: {all_measurements[i].shape} (erwartet: {first_shape})")
+    
+    # Stack zu einem Tensor
+    try:
+        result = torch.stack(all_measurements)
+        print(f"[DEBUG] extract_measurements: Finale Form des gestackten Tensors: {result.shape}")
+        
+        # Stelle sicher, dass die Form 2D ist: [samples, features]
+        if len(result.shape) > 2:
+            original_shape = result.shape
+            # Reshape zu [samples, features]
+            result = result.reshape(result.shape[0], -1)
+            print(f"[DEBUG] Tensor umgeformt von {original_shape} zu {result.shape}")
+        
+        return result
+    except Exception as e:
+        print(f"[FEHLER] Beim Stacking der Messungen: {e}")
+        raise
 
-        for index, row in data_overview.iterrows():
-            if row["Filename"] not in all_file_names:
-                continue
-
-            # Format correct filename
-            if row["Filename"].endswith(".nii") or row["Filename"].endswith(".nii.gz"):
-                pre_file_name = row["Filename"]
-                match_no_ext = re.search(r"([^/\\]+)\.[^./\\]*$", pre_file_name)  # Extract file stem
-                if match_no_ext:
-                    file_name = match_no_ext.group(1)
-            else:
-                file_name = row["Filename"]
-
-            patient_data = data[file_name]
-            flat_patient_data = flatten_array(patient_data).tolist()
-
-            if file_name not in subjects:
-                subjects[file_name] = {
-                    "name": file_name,
-                    "measurements": flat_patient_data,
-                    "labels": {}
-                }
-                
-                for var in variables:
-                    subjects[file_name]["labels"][var] = one_hot_labels[var].iloc[index].to_numpy().tolist()
-            else:
-                # Append data from additional atlases to existing subject data
-                subjects[file_name]["measurements"] += flat_patient_data
-
-    # Return the list of subjects and the filtered annotations
-    return list(subjects.values()), data_overview
 
 def process_subjects(
-    subjects: List[tio.Subject],
-   # transforms: tio.Compose,
+    subjects: List[dict],
     batch_size: int,
     shuffle_data: bool,
 ) -> DataLoader:
+    """
+    Bereitet Subjekte für das Modell vor und erstellt einen DataLoader.
+    Enthält Debug-Output, um Dimensionsprobleme zu identifizieren.
+    
+    Args:
+        subjects: Liste von Subjekt-Dictionaries
+        batch_size: Batchgröße für den DataLoader
+        shuffle_data: Ob die Daten gemischt werden sollen
+        
+    Returns:
+        DataLoader: DataLoader-Objekt mit korrekt formatierten Daten
+    """
+    print(f"[DEBUG] process_subjects: Verarbeite {len(subjects)} Subjekte")
+    
+    # Debug: Prüfe das erste Subjekt
+    if len(subjects) > 0:
+        first_subj = subjects[0]
+        print(f"[DEBUG] process_subjects: Schlüssel im ersten Subjekt: {list(first_subj.keys())}")
+        
+        # Überprüfe measurements
+        if 'measurements' in first_subj:
+            measurements = first_subj['measurements']
+            print(f"[DEBUG] process_subjects: Measurements Typ: {type(measurements)}")
+            
+            if isinstance(measurements, list):
+                print(f"[DEBUG] process_subjects: Measurements ist Liste der Länge {len(measurements)}")
+                # Wenn es eine Liste von Listen ist, prüfe die innere Struktur
+                if len(measurements) > 0 and isinstance(measurements[0], list):
+                    print(f"[DEBUG] process_subjects: Innere Liste hat Länge {len(measurements[0])}")
+                    
+                    # Analysiere die Struktur genauer
+                    roi_count = len(measurements)
+                    feature_count = len(measurements[0]) if len(measurements) > 0 else 0
+                    print(f"[DEBUG] process_subjects: Struktur scheint zu sein: [ROIs({roi_count}), Features({feature_count})]")
+                    print(f"[DEBUG] process_subjects: Das entspricht {roi_count * feature_count} Gesamtfeatures nach flattening")
+                    
+                    # Warnung wenn die Struktur ungewöhnlich erscheint
+                    if feature_count == 2 and roi_count > 20:
+                        print("[WARNUNG] Die Datenstruktur hat genau 2 Features pro ROI. " 
+                              "Dies könnte das Problem mit (Nx2 vs 52x100) verursachen!")
+            
+            elif hasattr(measurements, 'shape'):
+                print(f"[DEBUG] process_subjects: Measurements Shape: {measurements.shape}")
 
-    # Apply transformations
+    # Erstelle Dataset
     dataset = CustomDataset_2D(subjects=subjects)
-
-    # Create data loader
-    data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=shuffle_data)
-
-    # Return the DataLoader object
+    
+    # Überprüfe ein Element aus dem Dataset zur Diagnose
+    try:
+        sample_measurements, sample_labels, sample_name = dataset[0]
+        print(f"[DEBUG] process_subjects: Beispiel aus Dataset:")
+        print(f"  - Measurements Shape: {sample_measurements.shape}")
+        print(f"  - Labels Shape: {sample_labels.shape}")
+        print(f"  - Name: {sample_name}")
+    except Exception as e:
+        print(f"[FEHLER] Beim Zugriff auf Dataset-Element: {e}")
+    
+    # Erstelle DataLoader
+    data_loader = DataLoader(
+        dataset, 
+        batch_size=batch_size, 
+        shuffle=shuffle_data, 
+        num_workers=4,
+        pin_memory=True
+    )
+    
+    # Überprüfe einen Batch aus dem DataLoader
+    try:
+        sample_iter = iter(data_loader)
+        batch_measurements, batch_labels, batch_names = next(sample_iter)
+        print(f"[DEBUG] process_subjects: Beispiel-Batch aus DataLoader:")
+        print(f"  - Batch Measurements Shape: {batch_measurements.shape}")
+        print(f"  - Batch Labels Shape: {batch_labels.shape}")
+        print(f"  - Batch Size: {len(batch_names)}")
+        
+        # Spezifische Prüfung auf das Problem "1664x2 and 52x100"
+        if batch_measurements.shape[1] == 2:
+            print("[KRITISCHER FEHLER] Die Batch-Dimension ist genau 2! " 
+                  "Dies verursacht wahrscheinlich den '1664x2 and 52x100' Fehler.")
+            print("[LÖSUNG] Die Messdaten müssen umgeformt werden - siehe korrigierte CustomDataset_2D Klasse.")
+    except Exception as e:
+        print(f"[FEHLER] Beim Zugriff auf Batch aus DataLoader: {e}")
+    
     return data_loader
 
+# Korrigierte Pipeline mit Dimensionsanpassung
 
-#process latent space into visualization
-def process_latent_space_2D(
-    # The AnnData object that contains the latent space representation of the MRI data.
-    adata: ad.AnnData,
-    # The annotations DataFrame that contains the meta data annotations for the MRI data.
-    annotations: pd.DataFrame,
-    # The number of neighbors for the UMAP calculation.
-    umap_neighbors: int,
-    # The random seed for reproducibility of the UMAP calculation.
-    seed: int,
-    # Name of the atlas / model whose latent space should be processed. 
-    atlas_name,
-    # Whether the data should be saved or not. If True, save_path, timestamp, epoch and data_type must be provided.
-    save_data: bool = False,
-    # The path where the data should be saved.
-    save_path: str = None,
-    # The timestamp of the current run, used for the filename.
-    timestamp: str = None,
-    # The current epoch, used for the filename.
-    epoch: int = None,
-    # The data type of adata (typically "training" or "validation"), used for the filename.
-    data_type: str = None,
-) -> ad.AnnData:
+# Prepare data loaders mit korrigierter Funktion
+print("\n[DEBUG] === STARTING DATA LOADER PREPARATION ===")
+train_loader_norm = process_subjects(
+    subjects=train_subjects_norm,
+    batch_size=config.BATCH_SIZE,
+    shuffle_data=config.SHUFFLE_DATA,
+)
+valid_loader_norm = process_subjects(
+    subjects=valid_subjects_norm,
+    batch_size=config.BATCH_SIZE,
+    shuffle_data=False,
+)
 
-    # align annotation metadata with anndata.obs
-    aligned_ann = annotations.set_index("Filename").reindex(adata.obs_names)
+# Log the used atlas and the number of ROIs
+log_atlas_mode(atlas_name=config.ATLAS_NAME, num_rois=len_atlas)
 
-    # add annotation metadata to anndata.obs
-    for col in aligned_ann.columns:
-        adata.obs[col] = aligned_ann[col]
+# Log data setup
+log_data_loading(
+    datasets={
+        "Training Data": len(train_subjects_norm),
+        "Validation Data": len(valid_subjects_norm),
+    }
+)
 
-    # perform PCA, UMAP and neighbors calculations
-    sc.pp.pca(adata)
-    sc.pp.neighbors(adata, umap_neighbors, use_rep="X")
-    sc.tl.umap(adata, random_state=seed)
+## 2. Prepare and Run Normative Modeling Pipeline --------------------------------
+print("\n[DEBUG] === PREPARE NORMATIVE MODELING PIPELINE ===")
 
-    # save the data if specified
-    if save_data:
-        adata.write_h5ad(
-            os.path.join(save_path, f"{timestamp}_e{epoch}_latent_{data_type}.h5ad")
-        )
+# Initialize Model
+log_model_setup()
 
-    # return the processed data
-    return adata
+# Extract features as torch tensors mit korrigierter Funktion
+print("\n[DEBUG] Extrahiere measurements aus Subjekten...")
+train_data = extract_measurements(train_subjects_norm)
+valid_data = extract_measurements(valid_subjects_norm)
 
+# Überprüfe resultierende Form
+print(f"[DEBUG] Training data shape: {train_data.shape}")
+print(f"[DEBUG] Validation data shape: {valid_data.shape}")
 
-def combine_latent_spaces(
-    tdata: ad.AnnData,
-    vdata: ad.AnnData,
-    umap_neighbors: int,
-    seed: int,
-    save_data: bool = False,
-    save_path: str = None,
-    timestamp: str = None,
-    epoch: int = None,
-    data_type: str = None,
-) -> ad.AnnData:
+# Passe die Form an, falls nötig (falls extract_measurements nicht bereits umformt)
+if len(train_data.shape) == 3:
+    print(f"[DEBUG] Reshape training data von {train_data.shape} auf 2D")
+    train_samples = train_data.shape[0]
+    train_data = train_data.reshape(train_samples, -1)
+    print(f"[DEBUG] Neue training data shape: {train_data.shape}")
 
-    # concatenate the training and validation data
-    cdata = ad.concat({"train": tdata, "valid": vdata}, join="outer", label="Data_Type")
+if len(valid_data.shape) == 3:
+    print(f"[DEBUG] Reshape validation data von {valid_data.shape} auf 2D")
+    valid_samples = valid_data.shape[0]
+    valid_data = valid_data.reshape(valid_samples, -1)
+    print(f"[DEBUG] Neue validation data shape: {valid_data.shape}")
 
-    # perform PCA, UMAP and neighbors calculations
-    sc.pp.pca(cdata)
-    sc.pp.neighbors(cdata, umap_neighbors, use_rep="X")
-    sc.tl.umap(cdata, random_state=seed)
+# Log endgültige Formen
+log_and_print(f"Training data shape: {train_data.shape}")
+log_and_print(f"Validation data shape: {valid_data.shape}")
 
-    # save the data if specified
-    if save_data:
-        cdata.write_h5ad(
-            os.path.join(save_path, f"{timestamp}_e{epoch}_latent_{data_type}.h5ad")
-        )
-
-    # return the combined data
-    return cdata
-
-
-def load_checkpoint_model(model, model_filename: str):
-
-    if os.path.isfile(model_filename):
-        log_and_print(f"Loading checkpoint from '{model_filename}'")
-
-        model_state = torch.load(model_filename)
-        model.load_state_dict(model_state)
-
-        log_and_print(f"Checkpoint loaded successfully")
-
-    else:
-        log_and_print(
-            f"No checkpoint found at '{model_filename}', starting training from scratch"
-        )
-
-        raise FileNotFoundError(f"No checkpoint found at '{model_filename}'")
-
-    return model
-
-
-# This function saves the model to a file.
-# This function needs an overhaul to:
-# - save model weights
-# - save optimizer state
-# - save scheduler state
-# - save model metrics
-# - save model hyperparameters
-# Ideally all of this would be saved in a single file.
-# Also this function probably belongs in the base model file.
-def save_model(model, save_path: str, timestamp: str, descriptor: str, epoch: int):
-    model_save_path = os.path.join(
-        save_path,
-        f"{timestamp}_{descriptor}_e{epoch}_model.pth",
-    )
-
-    torch.save(model.state_dict(), model_save_path)
-
-    log_checkpoint(model_path=model_save_path)
-
-
-# This function saves the model metrics to a csv file.
-# It should probably be combined with the save_model function.
-def save_model_metrics(model_metrics, save_path: str, timestamp: str, descriptor: str):
-    metrics_save_path = os.path.join(
-        save_path,
-        f"{timestamp}_{descriptor}_model_performance.csv",
-    )
-
-    pd.DataFrame(model_metrics).to_csv(metrics_save_path, index=False)
-
-    log_checkpoint(
-        metrics_path=metrics_save_path,
-    )
+# Save processed data tensors for future use
+torch.save(train_data, f"{save_dir}/data/train_data_tensor.pt")
+torch.save(valid_data, f"{save_dir}/data/valid_data_tensor.pt")

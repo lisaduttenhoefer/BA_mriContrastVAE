@@ -120,7 +120,7 @@ class Config_2D:
         # The paths to the csv files that contain metadata for the testing data
         TEST_CSV: List[str],
         # Name of atlas which should be used for training of the model
-        ATLAS_NAME: str,
+        ATLAS_NAME: List[str],
         # The path to the folder where intermediate normalitzed and scaled data should be saved
         PROC_DATA_PATH: str,
         # The path to the directory that contains the MRI .nii files
