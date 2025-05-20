@@ -110,9 +110,7 @@ def read_hdf5_to_df(filepath: str) -> pd.DataFrame:
     """
     try:
         with h5py.File(filepath, 'r') as f:
-            # Print the structure of the HDF5 file for debugging
-            print(f"[DEBUG] HDF5 file structure: {list(f.keys())}")
-            
+           
             # Assuming HDF5 file contains 'data' and 'index' datasets
             if 'data' in f and 'index' in f and 'columns' in f:
                 data = f['data'][:]
@@ -341,9 +339,7 @@ def read_hdf5_to_df(filepath: str) -> pd.DataFrame:
     
     try:
         with h5py.File(filepath, 'r') as f:
-            # Print the structure of the HDF5 file for debugging
-            print(f"[DEBUG] HDF5 file structure: {list(f.keys())}")
-            
+    
             # Assuming HDF5 file contains 'data' and 'index' datasets
             if 'data' in f and 'index' in f and 'columns' in f:
                 data = f['data'][:]
@@ -398,8 +394,6 @@ def load_mri_data_2D(
     valid_volume_types: List[str] = ["Vgm", "Vwm", "csf"],
 ) -> Tuple:
     
-    print("[DEBUG] Starting load_mri_data_2D function...")
-    
     # Define all available atlases
     all_available_atlases = ["cobra", "lpba40", "neuromorphometrics", "suit", "thalamic_nuclei", "thalamus"]
     
@@ -410,25 +404,22 @@ def load_mri_data_2D(
     # Check for the special case of ["all"]
     if len(atlas_name) == 1 and atlas_name[0] == "all":
         atlas_name = all_available_atlases
-        print(f"[DEBUG] 'all' specified - processing all available atlases: {atlas_name}")
-    
-    print(f"[DEBUG] Processing atlases: {atlas_name}")
+
+    print(f"[INFO] Processing atlases: {atlas_name}")
     
     # Handle CSV paths
     if csv_paths is not None:
         for csv_path in csv_paths: 
             assert os.path.isfile(csv_path), f"[ERROR] CSV file '{csv_path}' not found"
             assert annotations is None, "[ERROR] Both CSV and annotations provided"
-        print("[DEBUG] Loading CSV metadata...")
         data_overview = combine_dfs(csv_paths)
-        print("[DEBUG] CSV data successfully combined.")
         
     # Handle annotations
     elif annotations is not None:
         assert isinstance(annotations, pd.DataFrame), "[ERROR] Annotations must be a pandas DataFrame"
         assert csv_paths is None, "[ERROR] Both CSV and annotations provided"
         data_overview = annotations
-        print("[DEBUG] Annotations loaded successfully.")
+        print("[INFO] Annotations loaded successfully.")
         
     else:
         raise ValueError("[ERROR] No CSV path or annotations provided!")
@@ -436,15 +427,12 @@ def load_mri_data_2D(
     # Handling diagnoses filtering
     if diagnoses is None:
         diagnoses = data_overview["Diagnosis"].unique().tolist()
-        print(f"[DEBUG] Defaulting to all diagnoses: {diagnoses}")
     
     data_overview = data_overview[data_overview["Diagnosis"].isin(diagnoses)]
-    print(f"[DEBUG] Number of samples after diagnosis filtering: {len(data_overview)}")
     
     # Handling covariates and diagnoses lists
     covars = [covars] if not isinstance(covars, list) else covars
     diagnoses = [diagnoses] if not isinstance(diagnoses, list) else diagnoses
-    print(f"[DEBUG] Covariates processed: {covars}")
     
     # Prepare one-hot encoded labels
     one_hot_labels = {}
@@ -454,7 +442,6 @@ def load_mri_data_2D(
         if var not in data_overview.columns:
             raise ValueError(f"[ERROR] Column '{var}' not found in CSV file or annotations")
         one_hot_labels[var] = pd.get_dummies(data_overview[var], dtype=float)
-        print(f"[DEBUG] One-hot encoding completed for variable: {var}")
     
     # Data structures to store combined information across atlases
     subjects_dict = {}
@@ -462,37 +449,30 @@ def load_mri_data_2D(
     
     # Process each atlas in the list
     for atlas in atlas_name:
-        print(f"[DEBUG] Processing atlas: {atlas}")
+        print(f"[INFO] Processing atlas: {atlas}")
         atlas_data_path = f"{data_path}/Aggregated_{atlas}.h5"
-        print(f"[DEBUG] Atlas data path set to: {atlas_data_path}")
         
         # Check if atlas file exists before attempting to read it
         if not os.path.exists(atlas_data_path):
-            print(f"[WARNING] Atlas file not found: {atlas_data_path} - skipping this atlas")
+            print(f"[ERROR] Atlas file not found: {atlas_data_path} - skipping this atlas")
             continue
-        
-        # Load MRI data for this atlas
-        print(f"[DEBUG] Loading MRI data for {atlas}...")
-        
+       
         try:
             if hdf5:
                 data = read_hdf5_to_df(filepath=atlas_data_path)
             else:
                 data = pd.read_csv(atlas_data_path, header=[0, 1], index_col=0)
-            
-            print(f"[DEBUG] MRI data for {atlas} loaded successfully.")
+         
         except Exception as e:
-            print(f"[ERROR] Failed to load atlas {atlas}: {str(e)} - skipping this atlas")
+            print(f"[ERROR] Loading failed {atlas}; reason: {str(e)} -> skipping")
             continue
         
         # Extract unique patient IDs before flattening
         if isinstance(data.columns, pd.MultiIndex):
             all_file_names = data.columns.get_level_values(0).unique()
-            print(f"[DEBUG] Extracted {len(all_file_names)} unique patient IDs from MultiIndex.")
         else:
             all_file_names = data.columns
-            print(f"[DEBUG] Using all {len(all_file_names)} column names as file names.")
-        
+           
         # Extract ROI names for this atlas
         base_roi_names = data.index.tolist()
         
@@ -508,11 +488,10 @@ def load_mri_data_2D(
         
         # Add this atlas's ROI names to the overall list
         all_roi_names.extend(atlas_roi_names)
-        print(f"[DEBUG] Added {len(atlas_roi_names)} ROI names from atlas {atlas}")
+        print(f"[INFO] Added {len(atlas_roi_names)} ROI names from atlas {atlas}")
         
         # Normalize and scale data
         data = normalize_and_scale_df(data)
-        print(f"[DEBUG] MRI data for {atlas} normalized and scaled.")
         
         # *** FLATTENING MULTIINDEX EARLIER IN THE PROCESS ***
         if isinstance(data.columns, pd.MultiIndex):
@@ -522,21 +501,18 @@ def load_mri_data_2D(
                 filtered_columns = [(patient, vol) for patient, vol in data.columns if vol == volume_type]
                 if filtered_columns:
                     data = data[filtered_columns]
-                    print(f"[DEBUG] Filtered data to only include {volume_type} volume type.")
                 else:
-                    print(f"[WARNING] No columns found for volume_type {volume_type}")
+                    print(f"[ERROR] No columns found for volume_type {volume_type}")
             
             # Now flatten MultiIndex columns to patient_volumetype format
             flattened_columns = [f"{patient}_{volume}" for patient, volume in data.columns]
             data.columns = flattened_columns
-            print(f"[DEBUG] MultiIndex flattened early in process: {data.columns[:5]}...")
         
         # Save processed data if needed
         if save:
             volume_suffix = "_all" if volume_type == "all" else f"_{volume_type}"
             save_path = f"data/proc_extracted_xml_data/Proc_{atlas}{volume_suffix}_{train_or_test}.csv"
             data.to_csv(save_path)
-            print(f"[DEBUG] Processed MRI data saved to: {save_path}")
         
         # Process each subject for this atlas
         for index, row in data_overview.iterrows():
@@ -549,14 +525,14 @@ def load_mri_data_2D(
                 file_found = file_name in all_file_names
                 
             if not file_found:
-                print(f"[WARNING] Filename {file_name} not found in MRI data for atlas {atlas}.")
+                print(f"[ERROR] Filename {file_name} not found in MRI data for atlas {atlas}.")
                 continue
             
             # Select patient data from the already flattened data frame
             patient_columns = [col for col in data.columns if col.startswith(f"{file_name}_")]
             
             if not patient_columns:
-                print(f"[WARNING] No columns found for patient {file_name} after flattening in atlas {atlas}.")
+                print(f"[ERROR] No columns for patient {file_name} after flattening in atlas {atlas}.")
                 continue
                 
             patient_data = data[patient_columns]
@@ -573,15 +549,14 @@ def load_mri_data_2D(
                 # Append this atlas's measurements to existing ones
                 subjects_dict[file_name]["measurements"] += flat_patient_data
         
-    
     # Make sure we found at least one valid atlas
     if not subjects_dict:
         raise ValueError("[ERROR] No valid data was processed from any atlas!")
     
     # Convert dictionary to list of subjects
     subjects = list(subjects_dict.values())
-    print(f"[DEBUG] Total subjects processed across all atlases: {len(subjects)}")
-    print("[DEBUG] Data loading complete!")
+    print(f"[INFO] Total subjects processed across all atlases: {len(subjects)}")
+    print("[INFO] Data loading complete!")
     
     return subjects, data_overview, all_roi_names
 
@@ -615,60 +590,42 @@ def load_mri_data_2D_all_atlases(
     Returns:
         Tuple: A tuple containing the list of subject data, filtered annotations DataFrame, and list of ROI names
     """
-    print("[DEBUG] Starting load_mri_data_2D_all_atlases function...")
     
     # Validate volume_type parameter
     if volume_type != "all" and volume_type not in valid_volume_types:
         raise ValueError(f"[ERROR] Invalid volume_type: {volume_type}. Must be one of: {valid_volume_types} or 'all'")
     
-    print(f"[DEBUG] Processing atlases: {atlas_names}")
-
     # If the CSV path is provided, check if the file exists, make sure that the annotations are not provided
     if csv_paths is not None:
         for csv_path in csv_paths: 
             assert os.path.isfile(csv_path), f"[ERROR] CSV file '{csv_path}' not found"
             assert annotations is None, "[ERROR] Both CSV and annotations provided"
 
-        # Initialize the data overview DataFrame
-        print("[DEBUG] Loading CSV metadata...")
-        data_overview = combine_dfs(csv_paths)
-        print("[DEBUG] CSV data successfully combined.")
-
     # If the annotations are provided, make sure that they are a pandas DataFrame, and that the CSV path is not provided
     elif annotations is not None:
         assert isinstance(
             annotations, pd.DataFrame
-        ), "[ERROR] Annotations must be a pandas DataFrame"
-        assert csv_paths is None, "[ERROR] Both CSV and annotations provided"
-
+        )
+        assert csv_paths is None
         # Initialize the data overview DataFrame
         data_overview = annotations
-        print("[DEBUG] Annotations loaded successfully.")
-    
-    else:
-        raise ValueError("[ERROR] No CSV path or annotations provided!")
-
+        
     # If no diagnoses are provided, use all diagnoses in the data overview
     if diagnoses is None:
         diagnoses = data_overview["Diagnosis"].unique().tolist()
-        print(f"[DEBUG] Defaulting to all diagnoses: {diagnoses}")
-
+        
     # Filter unwanted diagnoses
     data_overview = data_overview[data_overview["Diagnosis"].isin(diagnoses)]
-    print(f"[DEBUG] Number of samples after diagnosis filtering: {len(data_overview)}")
-    print("[DEBUG] Sample count per diagnosis after filtering:")
     print(data_overview["Diagnosis"].value_counts())
     
     # Handle data columns similar to load_mri_data_2D
     try:
         data_overview = data_overview[["Filename", "Dataset", "Diagnosis", "Age", "Sex", "Usage_original", "Sex_int"]]
-        print(f"[DEBUG] Number of samples after column selection: {len(data_overview)}")
     except KeyError as e:
-        print(f"[WARNING] Could not select all columns: {e}. Using available columns.")
+        print(f"[ERROR] Could not select all columns: {e}. Using available columns.")
     
     # If the covariates are not a list, make them a list
     covars = [covars] if not isinstance(covars, list) else covars
-    print(f"[DEBUG] Covariates processed: {covars}")
 
     # If the diagnoses are not a list, make them a list
     diagnoses = [diagnoses] if not isinstance(diagnoses, list) else diagnoses
@@ -685,7 +642,6 @@ def load_mri_data_2D_all_atlases(
 
         # one hot encode the variable
         one_hot_labels[var] = pd.get_dummies(data_overview[var], dtype=float)
-        print(f"[DEBUG] One-hot encoding completed for variable: {var}")
 
     # For each subject, collect MRI data and variable data in the Subject object
     subjects_dict = {}
@@ -693,28 +649,19 @@ def load_mri_data_2D_all_atlases(
 
     # Process each atlas in the list
     for atlas in atlas_names:
-        print(f"[DEBUG] Processing atlas: {atlas}")
         atlas_data_path = f"{data_path}/Aggregated_{atlas}.h5"
-        print(f"[DEBUG] Atlas data path set to: {atlas_data_path}")
-        
-        # Load MRI data for this atlas
-        print(f"[DEBUG] Loading MRI data for {atlas}...")
         
         if hdf5:
             data = read_hdf5_to_df(filepath=atlas_data_path)
         else:
             data = pd.read_csv(atlas_data_path, header=[0, 1], index_col=0)
         
-        print(f"[DEBUG] MRI data for {atlas} loaded successfully.")
-        
         # Extract unique patient IDs before flattening
         if isinstance(data.columns, pd.MultiIndex):
             all_file_names = data.columns.get_level_values(0).unique()
-            print(f"[DEBUG] Extracted {len(all_file_names)} unique patient IDs from MultiIndex.")
         else:
             all_file_names = data.columns
-            print(f"[DEBUG] Using all {len(all_file_names)} column names as file names.")
-        
+            
         # Extract ROI names for this atlas
         base_roi_names = data.index.tolist()
         
@@ -726,7 +673,6 @@ def load_mri_data_2D_all_atlases(
         
         # Add this atlas's ROI names to the overall list
         all_roi_names.extend(atlas_roi_names)
-        print(f"[DEBUG] Added {len(atlas_roi_names)} ROI names from atlas {atlas}")
         
         # Handle MultiIndex columns earlier in the process like in load_mri_data_2D
         if isinstance(data.columns, pd.MultiIndex):
@@ -736,39 +682,33 @@ def load_mri_data_2D_all_atlases(
                 filtered_columns = [(patient, vol) for patient, vol in data.columns if vol == volume_type]
                 if filtered_columns:
                     data = data[filtered_columns]
-                    print(f"[DEBUG] Filtered data to only include {volume_type} volume type.")
-                else:
-                    print(f"[WARNING] No columns found for volume_type {volume_type}")
-            
+                
             # Now flatten MultiIndex columns to patient_volumetype format
             flattened_columns = [f"{patient}_{volume}" for patient, volume in data.columns]
             data.columns = flattened_columns
-            print(f"[DEBUG] MultiIndex flattened early in process: {data.columns[:5]}...")
             
         # Normalize and scale data
         data = normalize_and_scale_df(data)
-        print(f"[DEBUG] MRI data for {atlas} normalized and scaled.")
         
         # Save processed data if needed
         if save:
             volume_suffix = "_all" if volume_type == "all" else f"_{volume_type}"
             save_path = f"data/proc_extracted_xml_data/Proc_{atlas}{volume_suffix}_{train_or_test}.csv"
             data.to_csv(save_path)
-            print(f"[DEBUG] Processed MRI data saved to: {save_path}")
-        
+            
         # Process each subject for this atlas
         for index, row in data_overview.iterrows():
             file_name = re.sub(r"\.[^.]+$", "", row["Filename"])
             
             if file_name not in all_file_names:
-                print(f"[WARNING] Filename {file_name} not found in MRI data for atlas {atlas}.")
+            
                 continue
             
             # Select patient data from the already flattened data frame
             patient_columns = [col for col in data.columns if col.startswith(f"{file_name}_")]
             
             if not patient_columns:
-                print(f"[WARNING] No columns found for patient {file_name} after flattening in atlas {atlas}.")
+
                 continue
                 
             patient_data = data[patient_columns]
@@ -788,8 +728,7 @@ def load_mri_data_2D_all_atlases(
     
     # Convert dictionary to list of subjects
     subjects = list(subjects_dict.values())
-    print(f"[DEBUG] Total subjects processed across all atlases: {len(subjects)}")
-    print("[DEBUG] Data loading complete!")
+    print("[INFO] Data loading complete!")
     
     return subjects, data_overview, all_roi_names
 
@@ -906,16 +845,6 @@ def load_checkpoint_model(model, model_filename: str):
 
     return model
 
-
-# This function saves the model to a file.
-# This function needs an overhaul to:
-# - save model weights
-# - save optimizer state
-# - save scheduler state
-# - save model metrics
-# - save model hyperparameters
-# Ideally all of this would be saved in a single file.
-# Also this function probably belongs in the base model file.
 def save_model(model, save_path: str, timestamp: str, descriptor: str, epoch: int):
     model_save_path = os.path.join(
         save_path,
@@ -927,8 +856,6 @@ def save_model(model, save_path: str, timestamp: str, descriptor: str, epoch: in
     log_checkpoint(model_path=model_save_path)
 
 
-# This function saves the model metrics to a csv file.
-# It should probably be combined with the save_model function.
 def save_model_metrics(model_metrics, save_path: str, timestamp: str, descriptor: str):
     metrics_save_path = os.path.join(
         save_path,

@@ -67,10 +67,10 @@ matplotlib.use("Agg")
 
 def create_arg_parser():
     parser = argparse.ArgumentParser(description='Arguments for Normative Modeling Training')
-    parser.add_argument('--atlas_name', help='Name of the desired atlas for training.', type=list, default=["all"])
-    parser.add_argument('--num_epochs', help='Number of epochs to be trained for', type=int, default=100)
+    parser.add_argument('--atlas_name', help='Name of the desired atlas for training.',  nargs='+', default=["all"])
+    parser.add_argument('--num_epochs', help='Number of epochs to be trained for', type=int, default=200)
     parser.add_argument('--n_bootstraps', help='Number of bootstrap samples', type=int, default=50)
-    parser.add_argument('--norm_diagnosis', help='which diagnosis is considered the "norm"', type=str, default="MDD")
+    parser.add_argument('--norm_diagnosis', help='which diagnosis is considered the "norm"', type=str, default="HC")
     parser.add_argument('--train_ratio', help='Normpslit ratio', type=float, default=0.7)
     parser.add_argument('--batch_size', help='Batch size', type=int, default=32)
     parser.add_argument('--learning_rate', help='Learning rate', type=float, default=0.000559) #vor tuning: 4e-5
@@ -98,9 +98,9 @@ def main(atlas_name: list, num_epochs: int, n_bootstraps: int,norm_diagnosis: st
     TRAIN_CSV, TEST_CSV = split_df_adapt(path_original, path_to_dir,norm_diagnosis,train_ratio,seed)
     
     # Create output directory
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    timestamp = datetime.now().strftime("%Y%m%d")
     if output_dir is None:
-        save_dir = f"/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/analysis/TRAINIG/normative_results_{timestamp}{norm_diagnosis}"
+        save_dir = f"/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/analysis/TRAINING/normative_results_{timestamp}_{norm_diagnosis}_{train_ratio}"
     else:
         save_dir = output_dir
         
@@ -113,8 +113,8 @@ def main(atlas_name: list, num_epochs: int, n_bootstraps: int,norm_diagnosis: st
     os.makedirs(f"{save_dir}/logs", exist_ok=True)
     os.makedirs(f"{save_dir}/data", exist_ok=True)    
     # Set up configuration for the normative modeling
-    joined_atlas_name = "_".join(atlas_name)
-
+    
+    joined_atlas_name = "_".join(str(a) for a in atlas_name if isinstance(a, str))
 
     config = Config_2D(
         # General Parameters
