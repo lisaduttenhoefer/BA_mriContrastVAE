@@ -300,29 +300,29 @@ class Config_2D:
         else:
             self.RUN_NAME = RUN_NAME
 
-        self.OUTPUT_DIR = os.path.join(
-            self.OUTPUT_DIR, f"{self.TIMESTAMP}_{self.RUN_NAME}"
-        )
+        # self.OUTPUT_DIR = os.path.join(
+        #     self.OUTPUT_DIR, f"{self.TIMESTAMP}_{self.RUN_NAME}"
+        # )
         self.FIGURES_DIR = os.path.join(self.OUTPUT_DIR, "figures")
         self.LOGGING_DIR = os.path.join(self.OUTPUT_DIR, "logs")
         self.DATA_DIR = os.path.join(self.OUTPUT_DIR, "data")
         self.MODEL_DIR = os.path.join(self.OUTPUT_DIR, "models")
 
-        # set up run specific output directories
-        for path in [
-            self.OUTPUT_DIR,
-            self.FIGURES_DIR,
-            self.LOGGING_DIR,
-            self.DATA_DIR,
-            self.MODEL_DIR,
-        ]:
-            # make sure it doesn't already exist
-            assert not os.path.exists(
-                path
-            ), f"Path {path} already exists, and may be overwritten. Please rename or remove it."
+        # # set up run specific output directories
+        # for path in [
+        #     self.OUTPUT_DIR,
+        #     self.FIGURES_DIR,
+        #     self.LOGGING_DIR,
+        #     self.DATA_DIR,
+        #     self.MODEL_DIR,
+        # ]:
+            # # make sure it doesn't already exist
+            # assert not os.path.exists(
+            #     path
+            # ), f"Path {path} already exists, and may be overwritten. Please rename or remove it."
 
-            # create the directory
-            os.makedirs(path)
+            # # create the directory
+            # os.makedirs(path)
 
     def __str__(self):
         return str(vars(self))

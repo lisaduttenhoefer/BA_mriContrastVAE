@@ -51,10 +51,12 @@ def main(atlas_name: str, num_epochs: int, batch_size: int, learning_rate: float
     ## 0. Set Up ----------------------------------------------------------
     # Set Parameters for model training
     # Config has default parameters you may want to check
+    
     if output_dir is None:
         save_dir = f"/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/normative_results_{timestamp}"
     else:
         save_dir = output_dir
+
     # Split the original metadata csv file that contains all data into two separate ones: training metadata and testing metadata.
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     

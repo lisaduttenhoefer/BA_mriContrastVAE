@@ -73,8 +73,8 @@ def create_arg_parser():
     parser.add_argument('--norm_diagnosis', help='which diagnosis is considered the "norm"', type=str, default="HC")
     parser.add_argument('--train_ratio', help='Normpslit ratio', type=float, default=0.7)
     parser.add_argument('--batch_size', help='Batch size', type=int, default=32)
-    parser.add_argument('--learning_rate', help='Learning rate', type=float, default=0.000559) #vor tuning: 4e-5
-    parser.add_argument('--latent_dim', help='Dimension of latent space', type=int, default=128) #macht sinn???
+    parser.add_argument('--learning_rate', help='Learning rate', type=float, default=0.000559) #4e-5
+    parser.add_argument('--latent_dim', help='Dimension of latent space', type=int, default=20) #macht sinn???
     parser.add_argument('--kldiv_weight', help='Weight for KL divergence loss', type=float, default=1.4656)  #vor tuning:4.0
     parser.add_argument('--save_models', help='Save all bootstrap models', action='store_true', default=True)
     parser.add_argument('--no_cuda', help='Disable CUDA (use CPU only)', action='store_true')
@@ -97,10 +97,12 @@ def main(atlas_name: list, num_epochs: int, n_bootstraps: int,norm_diagnosis: st
     path_to_dir = "/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data_training"
     TRAIN_CSV, TEST_CSV = split_df_adapt(path_original, path_to_dir,norm_diagnosis,train_ratio,seed)
     
+    joined_atlas_name = "_".join(str(a) for a in atlas_name if isinstance(a, str))
+
     # Create output directory
-    timestamp = datetime.now().strftime("%Y%m%d")
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M")
     if output_dir is None:
-        save_dir = f"/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/analysis/TRAINING/normative_results_{timestamp}_{norm_diagnosis}_{train_ratio}"
+        save_dir = f"/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/analysis/TRAINING/norm_results_{norm_diagnosis}_{train_ratio}_{joined_atlas_name}_{timestamp}"
     else:
         save_dir = output_dir
         
@@ -113,12 +115,10 @@ def main(atlas_name: list, num_epochs: int, n_bootstraps: int,norm_diagnosis: st
     os.makedirs(f"{save_dir}/logs", exist_ok=True)
     os.makedirs(f"{save_dir}/data", exist_ok=True)    
     # Set up configuration for the normative modeling
-    
-    joined_atlas_name = "_".join(str(a) for a in atlas_name if isinstance(a, str))
 
     config = Config_2D(
         # General Parameters
-        RUN_NAME=f"NormativeVAE_{joined_atlas_name}_{timestamp}_{norm_diagnosis}",
+        RUN_NAME=f"NormativeVAE20_{joined_atlas_name}_{timestamp}_{norm_diagnosis}",
         # Input / Output Paths
         TRAIN_CSV=[TRAIN_CSV],
         TEST_CSV=[TEST_CSV],

@@ -70,17 +70,6 @@ def get_atlas(path: pathlib.PosixPath) -> str:
         atlas = match.group(1)
     return atlas
 
-# def combine_dfs(paths: list):
-#     # Combines any number of csv files to a single pandas DataFrame, keeping only shared column indices. 
-#     for i in range(1,len(paths)):
-#         if i == 1: 
-#             joined_df = pd.read_csv(paths[i-1], header=[0], index_col=0)
-#             next_df = pd.read_csv(paths[i], header=[0], index_col=0)
-#             joined_df = pd.concat([joined_df, next_df], join="inner")  # Parameter "inner" keeps only the shared column indices.
-#         else:
-#             next_df = pd.read_csv(paths[i], header=[0], index_col=0)
-#             joined_df = pd.concat([joined_df, next_df], join="inner")
-#     return joined_df
 
 def combine_dfs(paths: list):
     # Combines any number of csv files to a single pandas DataFrame, keeping only shared column indices. 
@@ -246,8 +235,8 @@ def train_val_split_subjects(
         else:
             unmatched_subjects.append(subject_name)
     
-    print(f"[INFO] Assigned {len(train_subjects)} subjects to training set")
-    print(f"[INFO] Assigned {len(valid_subjects)} subjects to validation set")
+    print(f"[INFO] {len(train_subjects)} subjects in training set")
+    print(f"[INFO] {len(valid_subjects)} subjects in validation set")
     
     if unmatched_subjects:
         print(f"[WARNING] {len(unmatched_subjects)} subjects not found in annotations:")
@@ -257,43 +246,6 @@ def train_val_split_subjects(
             print(f"  ... and {len(unmatched_subjects) - 5} more")
     
     return train_subjects, valid_subjects
-
-def train_val_split_subjects_OLD(
-    # The list of patients that should be split according to the prior train_val_split
-    subjects: List[dict], 
-    # Training annotations
-    train_ann: pd.DataFrame, 
-    # Validation annotations
-    val_ann: pd.DataFrame
-) -> Tuple[List, List]:
-    
-    train_files = list(train_ann["Filename"])
-    valid_files = list(val_ann["Filename"])
-
-    train_subjects = []
-    valid_subjects = []
-
-    for subject in subjects:
-
-        if subject["name"] in train_files:
-            train_subjects.append(subject)
-
-        elif subject["name"] in valid_files:
-            valid_subjects.append(subject)
-            
-        else: 
-            print(f"Filename {subject['name']} not found in annotations.")
-
-    return train_subjects, valid_subjects
-
-
-# This function loads MRI data (nii.gz or .nii file formats) and stores it in a list of tio.Subject objects. The filenames
-# that are used to load the MRI data are stored in a CSV file, or provided as an annotations pandas DataFrame. The
-# diagnoses and covariates are one-hot encoded and stored in the tio.Subject objects (covariates are other variables that
-# are not diagnoses, that the user specifies, that are in the CSV or annotations). The diagnoses of the subjects can be
-# filtered by providing a list of diagnoses. The function returns the list of tio.Subject objects and the annotations the
-# filtered annotations pandas DataFrame.
-
 
 class CustomDataset_2D():  
     # Create Datasets that can then be converted into DataLoader objects
@@ -319,11 +271,6 @@ class CustomDataset_2D():
 
         return measurements, labels, names
 
-#################
-import os
-import re
-import pandas as pd
-from typing import Tuple, List
 
 def read_hdf5_to_df(filepath: str) -> pd.DataFrame:
     """
@@ -350,6 +297,7 @@ def read_hdf5_to_df(filepath: str) -> pd.DataFrame:
                 # Try to load with pandas directly
                 df = pd.read_hdf(filepath)
             return df
+        
     except Exception as e:
         print(f"[ERROR] Failed to load HDF5 file {filepath}: {e}")
         
@@ -369,11 +317,6 @@ def combine_dfs(csv_paths: List[str]) -> pd.DataFrame:
         dfs.append(df)
     return pd.concat(dfs, ignore_index=True)
 
-def normalize_and_scale_df(df: pd.DataFrame) -> pd.DataFrame:
-    """Normalize and scale data in a DataFrame."""
-    # This is a placeholder - implement your actual normalization logic
-    return df  # Return original dataframe if no normalization needed
-
 def flatten_array(arr):
     """Flatten an array or series to 1D."""
     if isinstance(arr, pd.Series):
@@ -383,7 +326,7 @@ def flatten_array(arr):
 def load_mri_data_2D(
     data_path: str,
     atlas_name: List[str] = None,
-    csv_paths: list = None,
+    csv_paths: list[str] = None,
     annotations: pd.DataFrame = None,
     diagnoses: List[str] = None,
     covars: List[str] = [],
@@ -406,7 +349,8 @@ def load_mri_data_2D(
         atlas_name = all_available_atlases
 
     print(f"[INFO] Processing atlases: {atlas_name}")
-    
+   
+    csv_paths = [path.strip("[]'\"") for path in csv_paths]
     # Handle CSV paths
     if csv_paths is not None:
         for csv_path in csv_paths: 
@@ -424,11 +368,10 @@ def load_mri_data_2D(
     else:
         raise ValueError("[ERROR] No CSV path or annotations provided!")
     
+    data_overview = data_overview[data_overview["Diagnosis"].isin(diagnoses)]
     # Handling diagnoses filtering
     if diagnoses is None:
         diagnoses = data_overview["Diagnosis"].unique().tolist()
-    
-    data_overview = data_overview[data_overview["Diagnosis"].isin(diagnoses)]
     
     # Handling covariates and diagnoses lists
     covars = [covars] if not isinstance(covars, list) else covars

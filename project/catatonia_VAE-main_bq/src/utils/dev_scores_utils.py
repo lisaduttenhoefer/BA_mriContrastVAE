@@ -424,9 +424,20 @@ def analyze_regional_deviations(results_df, save_dir, clinical_data_path, volume
     
     # Function to calculate Cliff's Delta
     def calculate_cliffs_delta(x, y):
-        count_greater = sum(x_i > y_i for x_i in x for y_i in y)
-        count_less = sum(x_i < y_i for x_i in x for y_i in y)
-        delta = (count_greater - count_less) / (len(x) * len(y))
+        x = np.asarray(x)
+        y = np.asarray(y)
+    
+        # For each pair (x_i, y_j):
+        #  +1 if x_i > y_j
+        #  -1 if x_i < y_j
+        #   0 if x_i == y_j
+        dominance = np.zeros((len(x), len(y)))
+        for i, x_i in enumerate(x):
+            dominance[i] = np.sign(x_i - y)
+        
+        # Calculate Cliff's Delta as the mean of the dominance matrix
+        delta = np.mean(dominance)
+        
         return delta
     
     # Calculate effect sizes and create visualizations

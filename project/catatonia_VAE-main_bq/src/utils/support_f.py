@@ -92,22 +92,7 @@ def read_hdf5_to_df_t(filepath: str):
     except Exception as e:
         print(f"Error reading {filepath}: {e}")
         return None
-    
-# def split_df(path_original: str, path_to_dir: str):
 
-#     df = pd.read_csv(path_original, header=[0])
-#     df = df.drop(columns=["Unnamed: 0"])
-
-#     for option in ["training", "testing"]:
-#         if option == "training":
-#             path = f"{path_to_dir}/{option}_metadata.csv"
-#             subset_df = df[df["Usage_original"] != "testing"]
-#             subset_df.to_csv(path)
-#         elif option == "testing":
-#             path = f"{path_to_dir}/{option}_metadata.csv"
-#             subset_df = df[df["Usage_original"] == option]
-#             subset_df.to_csv(path)
-#changed to hc/others split
 
 import pandas as pd
 import os
