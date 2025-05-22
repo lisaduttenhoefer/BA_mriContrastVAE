@@ -69,7 +69,7 @@ def create_arg_parser():
     parser = argparse.ArgumentParser(description='Arguments for Normative Modeling Training')
     parser.add_argument('--atlas_name', help='Name of the desired atlas for training.',  nargs='+', default=["all"])
     parser.add_argument('--num_epochs', help='Number of epochs to be trained for', type=int, default=200)
-    parser.add_argument('--n_bootstraps', help='Number of bootstrap samples', type=int, default=50)
+    parser.add_argument('--n_bootstraps', help='Number of bootstrap samples', type=int, default=100)
     parser.add_argument('--norm_diagnosis', help='which diagnosis is considered the "norm"', type=str, default="HC")
     parser.add_argument('--train_ratio', help='Normpslit ratio', type=float, default=0.7)
     parser.add_argument('--batch_size', help='Batch size', type=int, default=32)

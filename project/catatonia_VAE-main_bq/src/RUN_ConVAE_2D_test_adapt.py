@@ -54,7 +54,7 @@ def main(args):
 
     #--------------------------------------- NECESSARY ARGUMENTS -----------------------------------------------------
     # Default model directory - will be used if not provided via command line
-    default_model_dir = "/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/analysis/TRAINING/norm_results_HC_0.7_all_20250521_0641"
+    default_model_dir = "/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/analysis/TRAINING/norm_results_HC_0.7_neuromorphometrics_20250521_0641"
     
     # Use command line argument if provided, otherwise use default
     model_dir = args.model_dir if args.model_dir else default_model_dir

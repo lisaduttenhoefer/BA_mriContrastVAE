@@ -114,13 +114,14 @@ def calculate_deviations(normative_models, data_tensor, annotations_df, device="
 
     #-------------------------------------------- CALCULATE COMBINED DEVIATION SCORE ---------------------------------------------------------------
     # Normalize both metrics to 0-1 range for easier interpretation
+    #'aiaiaiaaia'
     min_recon = results_df["reconstruction_error"].min()
     max_recon = results_df["reconstruction_error"].max()
     norm_recon = (results_df["reconstruction_error"] - min_recon) / (max_recon - min_recon)
     
     min_kl = results_df["kl_divergence"].min()
     max_kl = results_df["kl_divergence"].max()
-    norm_kl = (results_df["kl_divergence"] - min_kl) / (max_kl - min_kl)
+    # norm_kl = (results_df["kl_divergence"] - min_kl) / (max_kl - min_kl)
     
     # Combined deviation score (equal weighting of both metrics)
     results_df["deviation_score"] = (norm_recon + norm_kl) / 2
