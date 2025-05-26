@@ -84,7 +84,7 @@ def main(args):
         config_df = pd.read_csv(config_path)
         log_and_print_test(f"Loaded model configuration from {config_path}")
         
-        # Extract relevant parameters from config.csv
+        # Extract relevant parameters from config.csvmodel
         atlas_name = config_df["ATLAS_NAME"].iloc[0]
         # Handle the case where atlas_name is a list represented as a string
         if atlas_name.startswith('[') and atlas_name.endswith(']'):
@@ -231,6 +231,7 @@ def main(args):
     results_df = calculate_deviations(
         normative_models=bootstrap_models,
         data_tensor=clinical_data,
+        norm_diagnosis=norm_diagnosis,
         annotations_df=annotations_dev,
         device=device
     )

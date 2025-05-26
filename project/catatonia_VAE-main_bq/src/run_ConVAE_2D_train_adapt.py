@@ -74,7 +74,7 @@ def create_arg_parser():
     parser.add_argument('--train_ratio', help='Normpslit ratio', type=float, default=0.7)
     parser.add_argument('--batch_size', help='Batch size', type=int, default=32)
     parser.add_argument('--learning_rate', help='Learning rate', type=float, default=0.000559) #4e-5
-    parser.add_argument('--latent_dim', help='Dimension of latent space', type=int, default=20) #macht sinn???
+    parser.add_argument('--latent_dim', help='Dimension of latent space', type=int, default=20) 
     parser.add_argument('--kldiv_weight', help='Weight for KL divergence loss', type=float, default=1.4656)  #vor tuning:4.0
     parser.add_argument('--save_models', help='Save all bootstrap models', action='store_true', default=True)
     parser.add_argument('--no_cuda', help='Disable CUDA (use CPU only)', action='store_true')
