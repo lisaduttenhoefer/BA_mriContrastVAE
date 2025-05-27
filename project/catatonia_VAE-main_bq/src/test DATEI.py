@@ -1,445 +1,309 @@
-def calculate_deviations_improved_pvalues(normative_models, data_tensor, norm_diagnosis, annotations_df, device="cuda"):
+import os
+os.environ["SCIPY_ARRAY_API"] = "1"
+import nibabel as nib
+import numpy as np
+import pandas as pd
+from nilearn import plotting
+import matplotlib.pyplot as plt
+import xml.etree.ElementTree as ET
+import re
+
+def normalize_spaces(text):
     """
-    Calculate deviation scores with improved p-value calculation specifically for 
-    deviations from the normative diagnosis group.
-    
+    Normalisiert Leerzeichen und bereinigt Strings für den Abgleich.
+    Ersetzt alle nicht-alphanumerischen Zeichen (außer Leerzeichen) durch Leerzeichen,
+    ersetzt alle Unicode-Leerzeichen durch ein Standardleerzeichen,
+    entfernt führende/nachfolgende Leerzeichen und ersetzt multiple Leerzeichen durch ein einzelnes.
+    """
+    if isinstance(text, str):
+        text = re.sub(r'[^a-zA-Z0-9\s]', ' ', text)
+        normalized_text = text.replace('\xa0', ' ') 
+        normalized_text = re.sub(r'\s+', ' ', normalized_text).strip()
+        return normalized_text.strip()
+    return text
+
+
+def prepare_effect_sizes_dataframe(effect_sizes_file_path, file_type, raw_roi_name_col, effect_size_col, target_atlas_name="neuromorphometrics"):
+    """
+    Lädt Effektgrößen aus einer Datei, filtert nach Atlasname und bereinigt ROI-Namen.
+
     Args:
-        normative_models: List of trained normative VAE models
-        data_tensor: Tensor of input data to evaluate
-        annotations_df: DataFrame with subject metadata
-        device: Computing device
-        
+        effect_sizes_file_path (str): Pfad zur Datei (CSV oder Excel) mit den Effektgrößen.
+        file_type (str): Der Typ der Datei ('csv' oder 'excel').
+        raw_roi_name_col (str): Der ursprüngliche Name der Spalte mit den unbereinigten ROI-Namen.
+        effect_size_col (str): Der Name der Spalte mit den Effektgrößen (z.B. 'Cliffs_Delta').
+        target_atlas_name (str): Der Atlasname, nach dem gefiltert werden soll (z.B. 'neuromorphometrics').
+
     Returns:
-        DataFrame with deviation scores for each subject
+        pd.DataFrame: Ein bereinigter DataFrame mit den Spalten 'ROI_Name_Cleaned' und dem Effektgrößen-Namen,
+                      oder None, wenn ein Fehler auftritt.
     """
+    try:
+        if file_type == 'csv':
+            df = pd.read_csv(effect_sizes_file_path)
+        elif file_type == 'excel':
+            df = pd.read_excel(effect_sizes_file_path)
+        else:
+            print(f"Fehler: Ungültiger Dateityp '{file_type}'. Bitte 'csv' oder 'excel' verwenden.")
+            return None
 
-    # Verify data alignment (same as before)
-    total_models = len(normative_models)
-    total_subjects = data_tensor.shape[0]
-    
-    if total_subjects != len(annotations_df):
-        print(f"WARNING: Size mismatch detected: {total_subjects} samples in data tensor vs {len(annotations_df)} rows in annotations")
-        print("Creating properly aligned dataset by extracting common subjects...")
-        valid_indices = list(range(min(total_subjects, len(annotations_df))))
-        aligned_annotations = annotations_df.iloc[valid_indices].reset_index(drop=True)
-        annotations_df = aligned_annotations
-        print(f"Aligned datasets - working with {len(annotations_df)} subjects")
-    
-    # Calculate deviation metrics (same as before)
-    all_recon_errors = np.zeros((total_subjects, total_models))
-    all_kl_divs = np.zeros((total_subjects, total_models))
-    all_z_scores = np.zeros((total_subjects, data_tensor.shape[1], total_models))
-    
-    for i, model in enumerate(normative_models):
-        model.eval()
-        model.to(device)
-        with torch.no_grad():
-            batch_data = data_tensor.to(device)
-            recon, mu, log_var = model(batch_data)
-            
-            recon_error = torch.mean((batch_data - recon) ** 2, dim=1).cpu().numpy()
-            all_recon_errors[:, i] = recon_error
-            
-            kl_div = -0.5 * torch.sum(1 + log_var - mu.pow(2) - log_var.exp(), dim=1).cpu().numpy()
-            all_kl_divs[:, i] = kl_div
-            
-            z_scores = ((batch_data - recon) ** 2).cpu().numpy()
-            all_z_scores[:, :, i] = z_scores
+        print(f"Roh-Effektgrößen-DataFrame erfolgreich geladen von: {effect_sizes_file_path}")
+
+        if raw_roi_name_col not in df.columns:
+            print(f"Fehler: Spalte '{raw_roi_name_col}' nicht im DataFrame gefunden.")
+            print(f"Verfügbare Spalten: {df.columns.tolist()}")
+            return None
+        if effect_size_col not in df.columns:
+            print(f"Fehler: Spalte '{effect_size_col}' nicht im DataFrame gefunden.")
+            print(f"Verfügbare Spalten: {df.columns.tolist()}")
+            return None
+
+        df_filtered = df[df[raw_roi_name_col].astype(str).str.contains(target_atlas_name, na=False, case=False)] 
+        print(f"DataFrame nach '{target_atlas_name}' gefiltert. Ursprüngliche Zeilen: {len(df)}, Gefilterte Zeilen: {len(df_filtered)}")
+
+        if df_filtered.empty:
+            print(f"Keine Zeilen für den Atlas '{target_atlas_name}' gefunden. Überprüfen Sie den 'raw_roi_name_col' und 'target_atlas_name'.")
+            return None
+
+        df_filtered['ROI_Name_Temp'] = df_filtered[raw_roi_name_col].astype(str).apply(
+            lambda x: x.split(f"{target_atlas_name}_", 1)[1] if f"{target_atlas_name}_" in x else x
+        )
         
-        torch.cuda.empty_cache()
-    
-    # Average across bootstrap models
-    mean_recon_error = np.mean(all_recon_errors, axis=1)
-    std_recon_error = np.std(all_recon_errors, axis=1)
-    mean_kl_div = np.mean(all_kl_divs, axis=1)
-    std_kl_div = np.std(all_kl_divs, axis=1)
-    mean_region_z_scores = np.mean(all_z_scores, axis=2)
-    
-    # Create result DataFrame
-    results_df = annotations_df[["Filename", "Diagnosis", "Age", "Sex", "Dataset"]].copy()
-    results_df["reconstruction_error"] = mean_recon_error
-    results_df["reconstruction_error_std"] = std_recon_error
-    results_df["kl_divergence"] = mean_kl_div
-    results_df["kl_divergence_std"] = std_kl_div
-    
-    # Add region-wise z-scores
-    new_columns = pd.DataFrame(
-        mean_region_z_scores, 
-        columns=[f"region_{i}_z_score" for i in range(mean_region_z_scores.shape[1])]
-    )
-    results_df = pd.concat([results_df, new_columns], axis=1)
-    
-    # Calculate combined deviation scores (same as before)
-    scaler_recon = StandardScaler()
-    scaler_kl = StandardScaler()
-    
-    z_norm_recon = scaler_recon.fit_transform(mean_recon_error.reshape(-1, 1)).flatten()
-    z_norm_kl = scaler_kl.fit_transform(mean_kl_div.reshape(-1, 1)).flatten()
-    
-    results_df["deviation_score_zscore"] = (z_norm_recon + z_norm_kl) / 2
-    
-    recon_percentiles = stats.rankdata(mean_recon_error) / len(mean_recon_error)
-    kl_percentiles = stats.rankdata(mean_kl_div) / len(mean_kl_div)
-    results_df["deviation_score_percentile"] = (recon_percentiles + kl_percentiles) / 2
-    
-    min_recon = results_df["reconstruction_error"].min()
-    max_recon = results_df["reconstruction_error"].max()
-    norm_recon = (results_df["reconstruction_error"] - min_recon) / (max_recon - min_recon)
-    
-    min_kl = results_df["kl_divergence"].min()
-    max_kl = results_df["kl_divergence"].max()
-    norm_kl = (results_df["kl_divergence"] - min_kl) / (max_kl - min_kl)
-    
-    results_df["deviation_score"] = (norm_recon + norm_kl) / 2
-    
-    #=== IMPROVED P-VALUE CALCULATION ===
-    
-    # Get control group data
-    control_mask = results_df["Diagnosis"] == norm_diagnosis
-    if not control_mask.any():
-        print(f"WARNING: No control group '{norm_diagnosis}' found in data. Available diagnoses: {results_df['Diagnosis'].unique()}")
-        control_indices = np.argsort(results_df["deviation_score_zscore"])[:len(results_df)//4]
-        control_mask = np.zeros(len(results_df), dtype=bool)
-        control_mask[control_indices] = True
-        print(f"Using bottom 25% ({control_mask.sum()} subjects) as reference group")
-    
-    # Extract normative group data
-    norm_recon = results_df.loc[control_mask, "reconstruction_error"].values
-    norm_kl = results_df.loc[control_mask, "kl_divergence"].values
-    norm_combined = results_df.loc[control_mask, "deviation_score_zscore"].values
-    
-    print(f"Using {len(norm_recon)} subjects from '{norm_diagnosis}' as normative reference")
-    
-    # Method 1: Empirical p-values (current approach, but cleaner)
-    p_values_empirical_recon = []
-    p_values_empirical_kl = []
-    p_values_empirical_combined = []
-    
-    # Method 2: Parametric p-values (assuming normal distribution)
-    p_values_parametric_recon = []
-    p_values_parametric_kl = []
-    p_values_parametric_combined = []
-    
-    # Method 3: Z-scores relative to normative group
-    z_scores_recon = []
-    z_scores_kl = []
-    z_scores_combined = []
-    
-    # Method 4: Percentile-based deviation scores
-    percentile_scores_recon = []
-    percentile_scores_kl = []
-    percentile_scores_combined = []
-    
-    # Calculate normative group statistics
-    norm_recon_mean = np.mean(norm_recon)
-    norm_recon_std = np.std(norm_recon)
-    norm_kl_mean = np.mean(norm_kl)
-    norm_kl_std = np.std(norm_kl)
-    norm_combined_mean = np.mean(norm_combined)
-    norm_combined_std = np.std(norm_combined)
-    
-    for idx, row in results_df.iterrows():
-        subject_recon = row["reconstruction_error"]
-        subject_kl = row["kl_divergence"]
-        subject_combined = row["deviation_score_zscore"]
+        suffixes_to_remove = ['_Vgm', '_Vwm', '_csf'] 
         
-        # === Method 1: Empirical p-values ===
-        # Probability of seeing this value or higher in the normative group
-        p_emp_recon = np.mean(norm_recon >= subject_recon)
-        p_emp_kl = np.mean(norm_kl >= subject_kl)
-        p_emp_combined = np.mean(norm_combined >= subject_combined)
+        df_filtered['ROI_Name_Cleaned'] = df_filtered['ROI_Name_Temp'].astype(str).apply(
+            lambda x: x
+        )
         
-        # For very extreme values, use (count + 1) / (n + 1) to avoid p=0
-        p_emp_recon = max(p_emp_recon, 1/(len(norm_recon) + 1))
-        p_emp_kl = max(p_emp_kl, 1/(len(norm_kl) + 1))
-        p_emp_combined = max(p_emp_combined, 1/(len(norm_combined) + 1))
+        for suffix in suffixes_to_remove:
+            df_filtered['ROI_Name_Cleaned'] = df_filtered['ROI_Name_Cleaned'].apply(
+                lambda x: x.replace(suffix, '') if isinstance(x, str) and x.endswith(suffix) else x
+            )
         
-        p_values_empirical_recon.append(p_emp_recon)
-        p_values_empirical_kl.append(p_emp_kl)
-        p_values_empirical_combined.append(p_emp_combined)
+        df_filtered['ROI_Name_Cleaned'] = df_filtered['ROI_Name_Cleaned'].apply(normalize_spaces)
         
-        # === Method 2: Parametric p-values (assuming normal distribution) ===
-        # Calculate z-score and then p-value
-        if norm_recon_std > 0:
-            z_recon = (subject_recon - norm_recon_mean) / norm_recon_std
-            p_param_recon = 1 - stats.norm.cdf(z_recon)  # One-tailed test (higher is worse)
+        cleaned_df = df_filtered[['ROI_Name_Cleaned', effect_size_col]].copy()
+        cleaned_df.rename(columns={'ROI_Name_Cleaned': 'ROI_Name'}, inplace=True)
+
+        print(f"ROI-Namen bereinigt und normalisiert. Beispielbereinigung:")
+        if not cleaned_df.empty and raw_roi_name_col in df.columns:
+            # Für eine konsistente Beispielausgabe: Holen Sie das Beispiel aus dem ursprünglichen DataFrame
+            # basierend auf dem Index der ersten Zeile im bereinigten DataFrame
+            example_idx = cleaned_df.index[0]
+            original_raw_name_for_example = df.loc[example_idx, raw_roi_name_col]
+            cleaned_name_for_example = cleaned_df.loc[example_idx, 'ROI_Name']
+            print(f"Original: '{original_raw_name_for_example}' -> Bereinigt: '{cleaned_name_for_example}'")
         else:
-            z_recon = 0
-            p_param_recon = 0.5
-            
-        if norm_kl_std > 0:
-            z_kl = (subject_kl - norm_kl_mean) / norm_kl_std
-            p_param_kl = 1 - stats.norm.cdf(z_kl)
-        else:
-            z_kl = 0
-            p_param_kl = 0.5
-            
-        if norm_combined_std > 0:
-            z_combined = (subject_combined - norm_combined_mean) / norm_combined_std
-            p_param_combined = 1 - stats.norm.cdf(z_combined)
-        else:
-            z_combined = 0
-            p_param_combined = 0.5
-        
-        p_values_parametric_recon.append(p_param_recon)
-        p_values_parametric_kl.append(p_param_kl)
-        p_values_parametric_combined.append(p_param_combined)
-        
-        # === Method 3: Store z-scores ===
-        z_scores_recon.append(z_recon)
-        z_scores_kl.append(z_kl)
-        z_scores_combined.append(z_combined)
-        
-        # === Method 4: Percentile scores ===
-        # What percentile is this subject in the normative distribution?
-        percentile_recon = stats.percentileofscore(norm_recon, subject_recon, kind='rank')
-        percentile_kl = stats.percentileofscore(norm_kl, subject_kl, kind='rank')
-        percentile_combined = stats.percentileofscore(norm_combined, subject_combined, kind='rank')
-        
-        percentile_scores_recon.append(percentile_recon)
-        percentile_scores_kl.append(percentile_kl)
-        percentile_scores_combined.append(percentile_combined)
-    
-    # Add all p-value methods to DataFrame
-    results_df["p_value_empirical_recon"] = p_values_empirical_recon
-    results_df["p_value_empirical_kl"] = p_values_empirical_kl
-    results_df["p_value_empirical_combined"] = p_values_empirical_combined
-    
-    results_df["p_value_parametric_recon"] = p_values_parametric_recon
-    results_df["p_value_parametric_kl"] = p_values_parametric_kl
-    results_df["p_value_parametric_combined"] = p_values_parametric_combined
-    
-    results_df["z_score_vs_norm_recon"] = z_scores_recon
-    results_df["z_score_vs_norm_kl"] = z_scores_kl
-    results_df["z_score_vs_norm_combined"] = z_scores_combined
-    
-    results_df["percentile_vs_norm_recon"] = percentile_scores_recon
-    results_df["percentile_vs_norm_kl"] = percentile_scores_kl
-    results_df["percentile_vs_norm_combined"] = percentile_scores_combined
-    
-    # === Method 5: Robust deviation scores using MAD (Median Absolute Deviation) ===
-    # More robust to outliers than standard deviation
-    norm_recon_median = np.median(norm_recon)
-    norm_kl_median = np.median(norm_kl)
-    norm_combined_median = np.median(norm_combined)
-    
-    norm_recon_mad = stats.median_abs_deviation(norm_recon)
-    norm_kl_mad = stats.median_abs_deviation(norm_kl)
-    norm_combined_mad = stats.median_abs_deviation(norm_combined)
-    
-    # Calculate robust z-scores (using MAD instead of std)
-    if norm_recon_mad > 0:
-        results_df["robust_z_score_recon"] = (results_df["reconstruction_error"] - norm_recon_median) / norm_recon_mad
-    else:
-        results_df["robust_z_score_recon"] = 0
-        
-    if norm_kl_mad > 0:
-        results_df["robust_z_score_kl"] = (results_df["kl_divergence"] - norm_kl_median) / norm_kl_mad
-    else:
-        results_df["robust_z_score_kl"] = 0
-        
-    if norm_combined_mad > 0:
-        results_df["robust_z_score_combined"] = (results_df["deviation_score_zscore"] - norm_combined_median) / norm_combined_mad
-    else:
-        results_df["robust_z_score_combined"] = 0
-    
-    # === Add summary statistics ===
-    results_df["is_outlier_recon_2std"] = np.abs(results_df["z_score_vs_norm_recon"]) > 2
-    results_df["is_outlier_recon_3std"] = np.abs(results_df["z_score_vs_norm_recon"]) > 3
-    results_df["is_outlier_combined_2std"] = np.abs(results_df["z_score_vs_norm_combined"]) > 2
-    results_df["is_outlier_combined_3std"] = np.abs(results_df["z_score_vs_norm_combined"]) > 3
-    
-    # Significance flags
-    results_df["significant_empirical_p05"] = results_df["p_value_empirical_combined"] < 0.05
-    results_df["significant_parametric_p05"] = results_df["p_value_parametric_combined"] < 0.05
-    results_df["significant_empirical_p01"] = results_df["p_value_empirical_combined"] < 0.01
-    results_df["significant_parametric_p01"] = results_df["p_value_parametric_combined"] < 0.01
-    
-    # Print summary statistics
-    print(f"\n=== DEVIATION ANALYSIS SUMMARY ===")
-    print(f"Normative group ('{norm_diagnosis}'): n={len(norm_recon)}")
-    print(f"Total subjects analyzed: n={len(results_df)}")
-    
-    print(f"\nNormative group statistics:")
-    print(f"  Reconstruction Error: {norm_recon_mean:.4f} ± {norm_recon_std:.4f}")
-    print(f"  KL Divergence: {norm_kl_mean:.4f} ± {norm_kl_std:.4f}")
-    print(f"  Combined Score: {norm_combined_mean:.4f} ± {norm_combined_std:.4f}")
-    
-    print(f"\nOutlier detection (>2 SD from norm):")
-    for diagnosis in results_df["Diagnosis"].unique():
-        if diagnosis == norm_diagnosis:
-            continue
-        dx_data = results_df[results_df["Diagnosis"] == diagnosis]
-        n_outliers_2std = dx_data["is_outlier_combined_2std"].sum()
-        n_outliers_3std = dx_data["is_outlier_combined_3std"].sum()
-        n_sig_emp = dx_data["significant_empirical_p05"].sum()
-        n_sig_param = dx_data["significant_parametric_p05"].sum()
-        
-        print(f"  {diagnosis} (n={len(dx_data)}): {n_outliers_2std} outliers >2SD, {n_outliers_3std} outliers >3SD")
-        print(f"    Significant (p<0.05): {n_sig_emp} empirical, {n_sig_param} parametric")
-    
-    return results_df
+            print("Keine bereinigten ROIs zum Anzeigen des Beispiels vorhanden (oder Original-DF leer).")
+
+        return cleaned_df
+
+    except FileNotFoundError:
+        print(f"Fehler: Die Effektgrößen-Datei wurde nicht gefunden unter: {effect_sizes_file_path}")
+        print("Bitte überprüfe den Pfad und stelle sicher, dass die Datei existiert.")
+        return None
+    except Exception as e:
+        print(f"Fehler beim Laden oder Verarbeiten der Effektgrößen-Datei: {e}")
+        return None
 
 
-def create_comprehensive_deviation_plots(results_df, save_dir, norm_diagnosis):
+def plot_brain_with_effect_sizes_neuromorphometrics(
+    atlas_nifti_path,
+    label_map_xml_path,
+    effect_sizes_df_cleaned,
+    roi_name_col_cleaned,
+    effect_size_col,
+    output_filename_prefix="brain_effect_sizes",
+    vmax=None,
+    cmap='viridis',
+    plot_interactive=False): # NEU: Option für interaktiven Plot
     """
-    Create comprehensive plots showing different p-value calculation methods.
+    Erstellt 3D-Visualisierungen eines NeuroMorphometrics Gehirnatlas mit eingefärbten ROI-Effektgrößen.
+    Erwartet einen bereits bereinigten DataFrame für die Effektgrößen.
+
+    Args:
+        atlas_nifti_path (str): Pfad zur NIfTI-Datei deines NeuroMorphometrics Gehirnatlas.
+        label_map_xml_path (str): Pfad zur XML-Datei, die die Label-Map des Atlases enthält.
+        effect_sizes_df_cleaned (pd.DataFrame): Der bereinigte DataFrame mit den Spalten 'ROI_Name' und Effektgrößen.
+        roi_name_col_cleaned (str): Name der Spalte im bereinigten DataFrame, die die ROI-Namen enthält (z.B. 'ROI_Name').
+        effect_size_col (str): Name der Spalte im DataFrame, die die Effektgrößen enthält.
+        output_filename_prefix (str): Präfix für die Ausgabedatei-Namen (z.B. "brain_effect_sizes").
+        vmax (float, optional): Maximalwert für die Farbskala. Wenn None, wird der maximale Effektgröße verwendet.
+        cmap (str): Name der Colormap (z.B. 'viridis', 'hot', 'coolwarm').
+        plot_interactive (bool): Wenn True, wird ein interaktiver Plot mit nilearn.plotting.view_img() erstellt.
     """
-    os.makedirs(f"{save_dir}/figures/pvalue_analysis", exist_ok=True)
+
+    # 1. NeuroMorphometrics Atlas laden
+    try:
+        atlas_img = nib.load(atlas_nifti_path)
+        atlas_data = atlas_img.get_fdata()
+        print(f"NeuroMorphometrics Atlas erfolgreich geladen von: {atlas_nifti_path}")
+    except FileNotFoundError:
+        print(f"Fehler: Die NIfTI-Datei des Atlases wurde nicht gefunden unter: {atlas_nifti_path}")
+        print("Bitte überprüfe den Pfad und stelle sicher, dass die Datei existiert.")
+        return
+    except Exception as e:
+        print(f"Fehler beim Laden des NeuroMorphometrics Atlases: {e}")
+        return
+
+    # 2. Label-Map XML-Datei parsen und Leerzeichen normalisieren
+    try:
+        tree = ET.parse(label_map_xml_path)
+        root = tree.getroot()
+        print(f"Label-Map XML-Datei erfolgreich geladen von: {label_map_xml_path}")
+    except FileNotFoundError:
+        print(f"Fehler: Die Label-Map XML-Datei wurde nicht gefunden unter: {label_map_xml_path}")
+        print("Bitte überprüfe den Pfad und stelle sicher, dass die Datei existiert.")
+        return
+    except Exception as e:
+        print(f"Fehler beim Parsen der Label-Map XML-Datei: {e}")
+        return
+
+    label_map = {}
+    for label in root.findall('Label'):
+        name = normalize_spaces(label.find('Name').text)
+        number = int(label.find('Number').text)
+        label_map[name] = number
+    print("ROI-Namen aus Label-Map normalisiert.")
+
+    # 3. Ein leeres Gehirnvolumen für die Effektgrößen erstellen
+    effect_map_data = np.zeros_like(atlas_data, dtype=float)
+
+    # 4. Effektgrößen den ROI-Nummern zuordnen und in das neue Volumen schreiben
+    found_rois = []
+    missing_rois = []
     
-    # Color palette
-    palette = sns.light_palette("blue", n_colors=4, reverse=True)
-    diagnosis_order = ["HC", "SCHZ", "CTT", "MDD"]
-    diagnosis_palette = dict(zip(diagnosis_order, palette))
-    
-    # 1. Compare empirical vs parametric p-values
-    plt.figure(figsize=(15, 10))
-    
-    diagnoses = [d for d in diagnosis_order if d in results_df["Diagnosis"].unique() and d != norm_diagnosis]
-    
-    for i, diagnosis in enumerate(diagnoses):
-        dx_data = results_df[results_df["Diagnosis"] == diagnosis]
-        if len(dx_data) == 0:
-            continue
-            
-        plt.subplot(2, len(diagnoses), i+1)
-        plt.scatter(dx_data["p_value_empirical_combined"], dx_data["p_value_parametric_combined"], 
-                   alpha=0.6, color=diagnosis_palette.get(diagnosis, 'gray'))
-        plt.plot([0, 1], [0, 1], 'r--', alpha=0.7)
-        plt.axhline(y=0.05, color='red', linestyle=':', alpha=0.7)
-        plt.axvline(x=0.05, color='red', linestyle=':', alpha=0.7)
-        plt.xlabel("Empirical p-value")
-        plt.ylabel("Parametric p-value")
-        plt.title(f"{diagnosis} (n={len(dx_data)})")
-        
-        plt.subplot(2, len(diagnoses), i+1+len(diagnoses))
-        plt.hist2d(dx_data["p_value_empirical_combined"], dx_data["p_value_parametric_combined"], 
-                  bins=20, cmap='Blues')
-        plt.plot([0, 1], [0, 1], 'r--', alpha=0.7)
-        plt.axhline(y=0.05, color='red', linestyle=':', alpha=0.7)
-        plt.axvline(x=0.05, color='red', linestyle=':', alpha=0.7)
-        plt.xlabel("Empirical p-value")
-        plt.ylabel("Parametric p-value")
-        plt.colorbar(label='Count')
-    
-    plt.tight_layout()
-    plt.savefig(f"{save_dir}/figures/pvalue_analysis/empirical_vs_parametric_pvalues.png", dpi=300)
-    plt.close()
-    
-    # 2. Z-score distributions by diagnosis
-    plt.figure(figsize=(15, 5))
-    
-    metrics = ["z_score_vs_norm_recon", "z_score_vs_norm_kl", "z_score_vs_norm_combined"]
-    titles = ["Reconstruction Error Z-score", "KL Divergence Z-score", "Combined Z-score"]
-    
-    for i, (metric, title) in enumerate(zip(metrics, titles)):
-        plt.subplot(1, 3, i+1)
-        
-        for diagnosis in diagnosis_order:
-            if diagnosis not in results_df["Diagnosis"].unique():
-                continue
-            dx_data = results_df[results_df["Diagnosis"] == diagnosis]
-            if len(dx_data) == 0:
-                continue
-                
-            if diagnosis == norm_diagnosis:
-                # Plot normative group as reference
-                sns.kdeplot(dx_data[metric], label=f"{diagnosis} (norm)", 
-                           color='black', linestyle='--', alpha=0.8)
+    if roi_name_col_cleaned not in effect_sizes_df_cleaned.columns or effect_size_col not in effect_sizes_df_cleaned.columns:
+        print(f"Fehler: Die erforderlichen Spalten '{roi_name_col_cleaned}' oder '{effect_size_col}'")
+        print("wurden im bereitgestellten DataFrame nicht gefunden. Überprüfen Sie die prepare_function.")
+        return
+
+    for index, row in effect_sizes_df_cleaned.iterrows():
+        roi_name = str(row[roi_name_col_cleaned])
+        effect_size = row[effect_size_col]
+
+        if roi_name in label_map:
+            roi_number = label_map[roi_name]
+            if np.any(atlas_data == roi_number):
+                effect_map_data[atlas_data == roi_number] = effect_size
+                found_rois.append(roi_name)
             else:
-                sns.kdeplot(dx_data[metric], label=f"{diagnosis} (n={len(dx_data)})", 
-                           color=diagnosis_palette.get(diagnosis, 'gray'))
-        
-        plt.axvline(x=0, color='black', linestyle='-', alpha=0.3)
-        plt.axvline(x=2, color='red', linestyle=':', alpha=0.7, label='2SD')
-        plt.axvline(x=-2, color='red', linestyle=':', alpha=0.7)
-        plt.axvline(x=3, color='red', linestyle='--', alpha=0.7, label='3SD')
-        plt.axvline(x=-3, color='red', linestyle='--', alpha=0.7)
-        
-        plt.xlabel("Z-score")
-        plt.ylabel("Density")
-        plt.title(title)
-        plt.legend(fontsize=8)
+                missing_rois.append(f"{roi_name} (ROI-Nummer {roi_number} nicht im Atlas gefunden)")
+        else:
+            missing_rois.append(f"{roi_name} (Nicht in Label-Map gefunden)")
+
+    if missing_rois:
+        print(f"\nWarnung: Folgende ROIs aus Ihrem bereinigten DataFrame wurden NICHT im Atlas / in der Label-Map gefunden und nicht geplottet:")
+        for roi in missing_rois:
+            print(f"- {roi}")
+    if found_rois:
+        print(f"\nInfo: {len(found_rois)} ROIs aus Ihrem bereinigten DataFrame wurden im Atlas gefunden und werden geplottet.")
+    else:
+        print("\nKeine der bereinigten ROIs aus Ihrem DataFrame wurde im Atlas gefunden. Bitte überprüfen Sie die ROI-Namen und die Atlas-Nummern.")
+        return
+
+    effect_map_img = nib.Nifti1Image(effect_map_data, atlas_img.affine, atlas_img.header)
+
+    if vmax is None:
+        max_val = np.max(np.abs(effect_map_data))
+        if max_val == 0:
+            vmax = 1.0
+            print("Info: Alle Effektgrößen sind Null. vmax wurde auf 1.0 gesetzt.")
+        else:
+            vmax = max_val
+            print(f"\nvmax wurde automatisch auf den Maximalwert der absoluten Effektgrößen gesetzt: {vmax:.2f}")
+
+    # Standardmäßige statische Plots (Glass Brain und Orthogonal)
+    print("\nErstelle statische Glass-Brain Visualisierung...")
+    fig_glass = plotting.plot_glass_brain(
+        effect_map_img,
+        display_mode='lzr',
+        colorbar=True,
+        cmap=cmap,
+        vmax=vmax,
+        title="Gehirn-Effektgrößen (Glass Brain)",
+        plot_abs=False
+    )
+    # glass_output_path = f"{output_filename_prefix}_glass.png"
+    # fig_glass.save_img(glass_output_path)
+    # print(f"Glass-Brain Visualisierung gespeichert unter: {glass_output_path}")
+
+    print("Erstelle statische orthogonale Visualisierung...")
+    fig_ortho = plotting.plot_stat_map(
+        effect_map_img,
+        bg_img=atlas_img,
+        display_mode='ortho',
+        colorbar=True,
+        cmap=cmap,
+        vmax=vmax,
+        title="Gehirn-Effektgrößen (Orthogonal)",
+        output_file=None
+    )
+    # ortho_output_path = f"{output_filename_prefix}_ortho.png"
+    # fig_ortho.save_img(ortho_output_path)
+    # print(f"Orthogonale Visualisierung gespeichert unter: {ortho_output_path}")
+
+    plt.show() # Zeigt die statischen Plots in Jupyter
+
+    # NEU: Interaktiver Plot mit view_img
+    if plot_interactive:
+        print("\nErstelle interaktive 3D-Visualisierung (öffnet im Browser oder Inline-Fenster)...")
+        # bg_img=atlas_img überlagert den Effekt auf die Anatomie
+        interactive_plot = plotting.view_img(
+            effect_map_img,
+            bg_img=atlas_img,
+            colorbar=True,
+            cmap=cmap,
+            vmax=vmax,
+            title="Interaktive Effektgrößen-Karte"
+        )
+        # interactive_plot.open_in_browser() # Optional: Öffnet den Plot in einem neuen Browser-Tab
+        print("Interaktiver Plot generiert. Eventuell musst du das Ausgabefenster des Notebooks scrollen.")
+        return interactive_plot # Gib das Plot-Objekt zurück, um es anzuzeigen
+
+
+# Beispiel-Anwendung
+if __name__ == '__main__':
+    neuro_morphometrics_atlas_path = "/workspace/project/catatonia_VAE-main_bq/data/atlases_niis/neuro_neu.nii" # Dein aktueller Atlas-Pfad
     
-    plt.tight_layout()
-    plt.savefig(f"{save_dir}/figures/pvalue_analysis/zscore_distributions.png", dpi=300)
-    plt.close()
-    
-    # 3. Percentile distributions
-    plt.figure(figsize=(15, 5))
-    
-    percentile_metrics = ["percentile_vs_norm_recon", "percentile_vs_norm_kl", "percentile_vs_norm_combined"]
-    
-    for i, (metric, title) in enumerate(zip(percentile_metrics, titles)):
-        plt.subplot(1, 3, i+1)
-        
-        for diagnosis in diagnosis_order:
-            if diagnosis not in results_df["Diagnosis"].unique() or diagnosis == norm_diagnosis:
-                continue
-            dx_data = results_df[results_df["Diagnosis"] == diagnosis]
-            if len(dx_data) == 0:
-                continue
-                
-            sns.kdeplot(dx_data[metric], label=f"{diagnosis} (n={len(dx_data)})", 
-                       color=diagnosis_palette.get(diagnosis, 'gray'))
-        
-        plt.axvline(x=50, color='black', linestyle='-', alpha=0.3, label='Median')
-        plt.axvline(x=95, color='red', linestyle=':', alpha=0.7, label='95th percentile')
-        plt.axvline(x=99, color='red', linestyle='--', alpha=0.7, label='99th percentile')
-        
-        plt.xlabel("Percentile vs. Normative Group")
-        plt.ylabel("Density")
-        plt.title(f"{title} - Percentiles")
-        plt.legend(fontsize=8)
-    
-    plt.tight_layout()
-    plt.savefig(f"{save_dir}/figures/pvalue_analysis/percentile_distributions.png", dpi=300)
-    plt.close()
-    
-    # 4. Summary table of different methods
-    summary_data = []
-    
-    methods = [
-        ("p_value_empirical_combined", "Empirical p-value"),
-        ("p_value_parametric_combined", "Parametric p-value"),
-        ("z_score_vs_norm_combined", "Z-score (>2SD)"),
-        ("percentile_vs_norm_combined", "Percentile (>95th)")
-    ]
-    
-    for diagnosis in diagnosis_order:
-        if diagnosis not in results_df["Diagnosis"].unique() or diagnosis == norm_diagnosis:
-            continue
-        dx_data = results_df[results_df["Diagnosis"] == diagnosis]
-        if len(dx_data) == 0:
-            continue
+    try:
+        test_atlas_img = nib.load(neuro_morphometrics_atlas_path)
+        print(f"Verwende vorhandene Atlas-Datei: {neuro_morphometrics_atlas_path}")
+    except FileNotFoundError:
+        print(f"Fehler: Atlas-Datei '{neuro_morphometrics_atlas_path}' nicht gefunden.")
+        print("Bitte stelle sicher, dass der Pfad korrekt ist oder erstelle einen Dummy-Atlas für Tests.")
+
+    my_actual_effect_sizes_csv_path = "/workspace/project/catatonia_VAE-main_bq/analysis/TESTING/deviation_results_norm_results_HC_0.7_all_20250521_0641_20250526_090143/regional_effect_sizes_vs_HC.csv"
+    label_map_xml_path = '/workspace/project/catatonia_VAE-main_bq/data/atlases_niis/atlases_labels/1103_3_glm_LabelMap.xml'
+
+    print("\n--- Vorverarbeitung des Effektgrößen-DataFrames ---")
+    effect_sizes_cleaned_df = prepare_effect_sizes_dataframe(
+        effect_sizes_file_path=my_actual_effect_sizes_csv_path,
+        file_type='csv',
+        raw_roi_name_col='ROI_Name',
+        effect_size_col='Cliffs_Delta',
+        target_atlas_name="neuromorphometrics"
+    )
+
+    if effect_sizes_cleaned_df is not None and not effect_sizes_cleaned_df.empty:
+        print("\n--- Starte Plot-Funktion für NeuroMorphometrics Atlas ---")
+        # NEU: plot_interactive=True hinzufügen, um den interaktiven Plot zu aktivieren
+        interactive_viewer = plot_brain_with_effect_sizes_neuromorphometrics(
+            atlas_nifti_path=neuro_morphometrics_atlas_path,
+            label_map_xml_path=label_map_xml_path,
+            effect_sizes_df_cleaned=effect_sizes_cleaned_df,
+            roi_name_col_cleaned='ROI_Name',
+            effect_size_col='Cliffs_Delta',
+            output_filename_prefix="neuromorphometrics_effect_sizes_processed",
+            cmap='coolwarm',
+            vmax=0.3,
+            plot_interactive=True # <--- Setze dies auf True für den interaktiven Plot
+        )
+        if interactive_viewer:
+            interactive_viewer.save_as_html("/workspace/project/catatonia_VAE-main_bq/interactive_brain_plot.html") # Optional: Speichern als HTML
+            print("YUP IT WORKED")
+            # interactive_viewer # Dies würde den Plot im Jupyter Notebook anzeigen, wenn der letzte Ausdruck in einer Zelle ein Plot-Objekt ist
             
-        row = {"Diagnosis": diagnosis, "N": len(dx_data)}
-        
-        # Count significant subjects by different methods
-        row["Empirical_p<0.05"] = (dx_data["p_value_empirical_combined"] < 0.05).sum()
-        row["Empirical_%"] = (dx_data["p_value_empirical_combined"] < 0.05).mean() * 100
-        
-        row["Parametric_p<0.05"] = (dx_data["p_value_parametric_combined"] < 0.05).sum()
-        row["Parametric_%"] = (dx_data["p_value_parametric_combined"] < 0.05).mean() * 100
-        
-        row["Z>2SD"] = (np.abs(dx_data["z_score_vs_norm_combined"]) > 2).sum()
-        row["Z>2SD_%"] = (np.abs(dx_data["z_score_vs_norm_combined"]) > 2).mean() * 100
-        
-        row["Z>3SD"] = (np.abs(dx_data["z_score_vs_norm_combined"]) > 3).sum()
-        row["Z>3SD_%"] = (np.abs(dx_data["z_score_vs_norm_combined"]) > 3).mean() * 100
-        
-        row["Percentile>95"] = (dx_data["percentile_vs_norm_combined"] > 95).sum()
-        row["Percentile>95_%"] = (dx_data["percentile_vs_norm_combined"] > 95).mean() * 100
-        
-        row["Mean_Z_score"] = dx_data["z_score_vs_norm_combined"].mean()
-        row["Mean_Percentile"] = dx_data["percentile_vs_norm_combined"].mean()
-        
-        summary_data.append(row)
-    
-    summary_df = pd.DataFrame(summary_data)
-    summary_df.to_csv(f"{save_dir}/figures/pvalue_analysis/method_comparison_summary.csv", index=False)
-    
-    print(f"\nMethod comparison summary:")
-    print(summary_df.to_string(index=False))
-    
-    return summary_df
+        print("\nPlot-Funktion abgeschlossen.")
+    else:
+        print("\nPlotting übersprungen, da es Probleme bei der Vorbereitung des Effektgrößen-DataFrames gab.")
