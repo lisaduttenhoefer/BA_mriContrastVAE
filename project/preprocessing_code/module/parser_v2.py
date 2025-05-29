@@ -68,248 +68,126 @@ def xml_parser(path_to_xml_file: str) -> dict:
     return results
 
 
-def dict_to_df(data_dict: dict, patient: str, ext: str, train: bool = True, config=None):
-    # Converts the dict of atlases into separate pandas DataFrames and saves these each to
-    # a csv file (once with rows as features and once with columns as features).
+def dict_to_df(parsed_dict, patient=None, ext="csv", config=None):
+    """
+    Convert parsed dictionary to CSV files
+    No longer differentiates between HC/non-HC
+    """
+    output_dir = config.EXTRACTED_CSV_DIR if config else "./xml_data"
     
-    for k, v in data_dict.items():  # k is the atlas, v is the data in the atlas
+    for atlas_name, df in parsed_dict.items():
+        # Add patient ID as column if provided
+        if patient is not None:
+            df["patient_id"] = patient
         
-        if config:
-            # Use config paths if provided
-            if train == True: 
-                filepath = f"{config.EXTRACTED_CSV_DIR}/Aggregated_{k}.{ext}"
-                filepath_t = f"{config.EXTRACTED_CSV_T_DIR}/Aggregated_{k}_t.{ext}"
-            else:
-                filepath = f"{config.EXTRACTED_CSV_DIR}/Aggregated_{k}.{ext}"
-                filepath_t = f"{config.EXTRACTED_CSV_T_DIR}/Aggregated_{k}_t.{ext}"
-        else:
-            # Fallback to original behavior
-            if train == True: 
-                filepath = f"./train_xml_data/Aggregated_{k}.{ext}"
-                filepath_t = f"./train_xml_data_t/Aggregated_{k}_t.{ext}"
-            else:
-                filepath = f"./test_xml_data/Aggregated_{k}.{ext}"
-                filepath_t = f"./test_xml_data_t/Aggregated_{k}_t.{ext}"
-
-        volumes = [vs for vs in v.keys() if vs != "names"]  # Measurements are volumes of white and gray matter
-
-        arrays = [[patient]*len(volumes), volumes]
-
-        tuples = list(zip(*arrays))
-
-        index = pd.MultiIndex.from_tuples(tuples, names = ["Filename", "Volume"])
-
-        if "names" not in v:
-            print(f"No names found in section {k}, skipping.")
-            continue
-       
-        data = {volume: v[volume] for volume in volumes}
-        df_new = pd.DataFrame(data, index=v["names"])
-        df_new.columns = index
-
-        # Check if file exists and has content
-        if not os.path.exists(filepath) or os.path.getsize(filepath) == 0:
-            # If file doesn't exist or is empty, just save the new dataframe
-            df_new.to_csv(filepath)  # feature columns
-            df_new_t = df_new.T
-            df_new_t.to_csv(filepath_t)  # feature rows
-        else:
-            try:
-                # Read existing file with proper MultiIndex handling
-                df_existing = pd.read_csv(filepath, header=[0, 1], index_col=0)
+        # Define file path
+        filepath = os.path.join(output_dir, f"Aggregated_{atlas_name}.{ext}")
+        
+        try:
+            # Check if file exists to decide between creating or appending
+            if os.path.exists(filepath) and os.path.getsize(filepath) > 0:
+                # Read existing data
+                existing_df = pd.read_csv(filepath, index_col=0)
+                # Append new data
+                combined_df = pd.concat([existing_df, df], axis=0)
+                # Save combined data
+                combined_df.to_csv(filepath)
                 
-                # Concatenate horizontally while preserving MultiIndex. To understand concatenation see process all paths function.
-                result = pd.concat([df_existing, df_new], axis=1)
-                # result.set_index(keys="Filename", inplace=True)
-                # Save with MultiIndex preserved
-                result.to_csv(filepath)  # feature columns
-                result_t = result.T
-                result_t.to_csv(filepath_t)  # feature rows
-            except Exception as e:
-                print(f"Error processing {filepath}: {e}")
-                # Fallback - just write the new data
-                df_new.to_csv(filepath)  # feature columns
-                df_new_t = df_new.T
-                df_new_t.to_csv(filepath_t)  # feature rows
-    return
-
-
-def dict_to_hdf5(data_dict: dict, patient: str, ext: str, train: bool = True, config=None):
-    # Converts the dict of atlases into separate pandas DataFrames and saves these each to
-    # a h5 file (once with rows as features and once with columns as features). h5 format allows computationally more efficient processing.
-    for k, v in data_dict.items():  # k is the atlas, v is the data in the atlas
-        
-        if config:
-            # Use config paths if provided
-            if train == True: 
-                filepath = f"{config.EXTRACTED_CSV_DIR}/Aggregated_{k}.{ext}"
-                filepath_t = f"{config.EXTRACTED_CSV_T_DIR}/Aggregated_{k}_t.{ext}"
+                # Also save transposed version if needed
+                if config and hasattr(config, 'EXTRACTED_CSV_T_DIR'):
+                    t_output_dir = config.EXTRACTED_CSV_T_DIR
+                    os.makedirs(t_output_dir, exist_ok=True)
+                    t_filepath = os.path.join(t_output_dir, f"Aggregated_{atlas_name}_t.{ext}")
+                    df_t = combined_df.T
+                    df_t.to_csv(t_filepath)
             else:
-                filepath = f"{config.EXTRACTED_CSV_DIR}/Aggregated_{k}.{ext}"
-                filepath_t = f"{config.EXTRACTED_CSV_T_DIR}/Aggregated_{k}_t.{ext}"
-        else:
-            # Fallback to original behavior
-            if train == True: 
-                filepath = f"./train_xml_data/Aggregated_{k}.{ext}"
-                filepath_t = f"./train_xml_data_t/Aggregated_{k}_t.{ext}"
-            else:
-                filepath = f"./test_xml_data/Aggregated_{k}.{ext}"
-                filepath_t = f"./test_xml_data_t/Aggregated_{k}_t.{ext}"
-
-# Sicherstellen, dass beide Ordner existieren
-        os.makedirs(os.path.dirname(filepath), exist_ok=True)
-        os.makedirs(os.path.dirname(filepath_t), exist_ok=True)
-        
-        volumes = [vs for vs in v.keys() if vs != "names"]  # Measurements are volumes of white and gray matter
-
-        if "names" not in v:
-            print(f"No names found in section {k}, skipping.")
-            continue
-            
-        # Create MultiIndex for columns
-        arrays = [[patient]*len(volumes), volumes]
-        tuples = list(zip(*arrays))
-        index = pd.MultiIndex.from_tuples(tuples, names=["Filename", "Volume"])
-        
-        # Create DataFrame with the new data
-        data = {volume: v[volume] for volume in volumes}
-        df_new = pd.DataFrame(data, index=v["names"])
-        df_new.columns = index
-        
-        # Check if file exists
-        df_new_t = df_new.T  # Transposed version
-        
-        # Process regular version
-        if not os.path.exists(filepath):
-            # If file doesn't exist, create it and save the dataframe
-            df_new.to_hdf(filepath, key='atlas_data', mode='w')
-        else:
-            try:
-                # Read the existing dataframe
-                df_existing = pd.read_hdf(filepath, key='atlas_data')
+                # Create new file
+                df.to_csv(filepath)
                 
-                # Check if patient already exists
-                patient_cols = [col for col in df_existing.columns if col[0] == patient]
-                if patient_cols:
-                    # Drop existing patient data
-                    df_existing = df_existing.drop(columns=patient_cols)
+                # Also save transposed version if needed
+                if config and hasattr(config, 'EXTRACTED_CSV_T_DIR'):
+                    t_output_dir = config.EXTRACTED_CSV_T_DIR
+                    os.makedirs(t_output_dir, exist_ok=True)
+                    t_filepath = os.path.join(t_output_dir, f"Aggregated_{atlas_name}_t.{ext}")
+                    df_t = df.T
+                    df_t.to_csv(t_filepath)
+        except Exception as e:
+            print(f"Error saving CSV {filepath}: {e}")
+
+def dict_to_hdf5(parsed_dict, patient=None, ext="h5", config=None):
+    """
+    Convert parsed dictionary to HDF5 files
+    No longer differentiates between HC/non-HC
+    """
+    output_dir = config.EXTRACTED_CSV_DIR if config else "./xml_data"
+    
+    for atlas_name, df in parsed_dict.items():
+        # Add patient ID as column if provided
+        if patient is not None:
+            df["patient_id"] = patient
+        
+        # Define file path
+        filepath = os.path.join(output_dir, f"Aggregated_{atlas_name}.{ext}")
+        
+        try:
+            # Check if file exists to decide between creating or appending
+            if os.path.exists(filepath):
+                # Read existing data
+                try:
+                    existing_df = pd.read_hdf(filepath, key='atlas_data')
+                    # Append new data
+                    combined_df = pd.concat([existing_df, df], axis=0)
+                    # Save combined data
+                    combined_df.to_hdf(filepath, key='atlas_data', mode='w', format='table')
                     
-                # Combine the existing data with new data
-                result = pd.concat([df_existing, df_new], axis=1)
+                    # Also save transposed version if needed
+                    if config and hasattr(config, 'EXTRACTED_CSV_T_DIR'):
+                        t_output_dir = config.EXTRACTED_CSV_T_DIR
+                        os.makedirs(t_output_dir, exist_ok=True)
+                        t_filepath = os.path.join(t_output_dir, f"Aggregated_{atlas_name}.{ext}")
+                        df_t = combined_df.T
+                        df_t.to_hdf(t_filepath, key='atlas_data_t', mode='w', format='table')
+                except Exception as e:
+                    print(f"Error appending to HDF5 {filepath}: {e}")
+            else:
+                # Create new file
+                df.to_hdf(filepath, key='atlas_data', mode='w', format='table')
                 
-                # Save updated dataframe
-                result.to_hdf(filepath, key='atlas_data', mode='w')
-                
-            except Exception as e:
-                print(f"Error processing regular file {filepath}: {e}")
-                # Fallback - just write the new data
-                df_new.to_hdf(filepath, key='atlas_data', mode='w')
-        
-        # Process transposed version
-        if not os.path.exists(filepath_t):
-            # If file doesn't exist, create it and save the dataframe
-            df_new_t.to_hdf(filepath_t, key='atlas_data_t', mode='w')
-        else:
-            try:
-                # Read the existing dataframe
-                df_existing_t = pd.read_hdf(filepath_t, key='atlas_data_t')
-                
-                # Remove existing patient data if it exists
-                if patient in df_existing_t.index.get_level_values(0):
-                    df_existing_t = df_existing_t.drop(index=patient, level=0, errors='ignore')
-                
-                # Combine the existing data with new data
-                result_t = pd.concat([df_existing_t, df_new_t], axis=0)
-                
-                # Save updated dataframe
-                result_t.to_hdf(filepath_t, key='atlas_data_t', mode='w')
-                
-            except Exception as e:
-                print(f"Error processing transposed file {filepath_t}: {e}")
-                # Fallback - just write the new data
-                df_new_t.to_hdf(filepath_t, key='atlas_data_t', mode='w')
+                # Also save transposed version if needed
+                if config and hasattr(config, 'EXTRACTED_CSV_T_DIR'):
+                    t_output_dir = config.EXTRACTED_CSV_T_DIR
+                    os.makedirs(t_output_dir, exist_ok=True)
+                    t_filepath = os.path.join(t_output_dir, f"Aggregated_{atlas_name}.{ext}")
+                    df_t = df.T
+                    df_t.to_hdf(t_filepath, key='atlas_data_t', mode='w', format='table')
+        except Exception as e:
+            print(f"Error saving HDF5 {filepath}: {e}")
 
-
-# def get_all_xml_paths(directory: str, valid_patients: list, train: bool = True, test_data: list = None) -> list:
-#     # Finds all xml paths in the directory for which there is also a marker in the metadata.
-#     if train == True: 
-#         assert test_data is not None, "Provide names of folders with desired testing data to exclude!"
-        
-#         xml_paths = pathlib.Path(directory).rglob("label/*.xml")
-#         xml_paths = list(xml_paths)
-#         xml_paths = [str(i) for i in xml_paths]
-
-#         xml_paths = remove_paths_containing(list_of_paths=xml_paths, keys=test_data)
-
-#     if train == False: 
-#         assert test_data is not None, "Provide names of folders with desired testing data to include!"
-
-#         xml_paths = pathlib.Path(directory).rglob("label/*.xml")  # rglob searches in all subdirectories
-#         xml_paths = list(xml_paths)
-#         xml_paths = [str(i) for i in xml_paths]  # Convert PosixPath to string to allow iteration
-
-#         xml_paths = keep_paths_containing(list_of_paths=xml_paths, keys=test_data)
-
-#     partial_set = set(valid_patients)
-#     filtered_paths = [
-#         xml_path for xml_path in xml_paths
-#         if any(partial_path in xml_path for partial_path in partial_set)
-#     ]
-    
-#     return filtered_paths
-
-def get_all_xml_paths(directory: str, valid_patients: list, metadata_paths: list, train: bool = True) -> list:
+def get_all_xml_paths(directory: str, valid_patients: list, metadata_paths: list):
     """
-    Finds all xml paths in the directory based on diagnosis criteria
-    
-    Args:
-        directory: Directory to search for XML files
-        valid_patients: List of valid patient IDs
-        metadata_paths: Paths to metadata CSV files with diagnosis information
-        train: If True, get non-HC patients for training; if False, get HC patients for testing
-        
-    Returns:
-        List of filtered XML paths
+    Get all xml files from directory that match valid_patients
+    without filtering by HC/non-HC status
     """
-    # First, get all xml paths
-    xml_paths = pathlib.Path(directory).rglob("label/*.xml")
-    xml_paths = [str(i) for i in list(xml_paths)]
+    all_paths = []
+    for root, _, files in os.walk(directory):
+        for file in files:
+            if file.endswith('.xml'):
+                full_path = os.path.join(root, file)
+                
+                # Extract patient ID from filename
+                match_no_ext = re.search(r"([^/\\]+)\.[^./\\]*$", full_path)
+                if match_no_ext:
+                    patient_id = match_no_ext.group(1)
+                    new_match = re.search(r"catROI_(.+)", patient_id)
+                    if new_match:
+                        patient_id = new_match.group(1)
+                        
+                    # Check if patient is in valid_patients list
+                    if patient_id in valid_patients:
+                        all_paths.append(full_path)
     
-    # Load metadata to get diagnosis information
-    diagnosis_data = {}
-    for path in metadata_paths:
-        df = pd.read_csv(path)
-        if 'Filename' in df.columns and 'Diagnosis' in df.columns:
-            for _, row in df.iterrows():
-                diagnosis_data[row['Filename']] = row['Diagnosis']
-    
-    # Filter by valid patients
-    partial_set = set(valid_patients)
-    filtered_paths = [
-        xml_path for xml_path in xml_paths
-        if any(partial_path in xml_path for partial_path in partial_set)
-    ]
-    
-    # Further filter by diagnosis
-    diagnosis_filtered = []
-    for path in filtered_paths:
-        # Extract patient ID from path
-        match_no_ext = re.search(r"([^/\\]+)\.[^./\\]*$", path)
-        if match_no_ext:
-            patient_id = match_no_ext.group(1)
-        
-        new_match = re.search(r"catROI_(.+)", patient_id)
-        if new_match:
-            patient_id = new_match.group(1)
-            
-        # Check if patient is in diagnosis data
-        if patient_id in diagnosis_data:
-            is_hc = diagnosis_data[patient_id] == "HC"
-            
-            if (train and is_hc) or (not train and not is_hc):
-                diagnosis_filtered.append(path)
-    
-    return diagnosis_filtered
+    print(f"Found {len(all_paths)} valid patient XML files in total")
+    return all_paths
 
 
 def process_all_paths(directory: str, valid_patients: list, metadata_paths: list, 
@@ -324,13 +202,13 @@ def process_all_paths(directory: str, valid_patients: list, metadata_paths: list
         parsed_dict = xml_parser(path)
         section_types.update(parsed_dict.keys())
     
-    # # Clear existing files at the beginning
-    # for section in section_types:
-    #     filepath = f"./xml_data/Aggregated_{section}.csv"
-    #     if os.path.exists(filepath):
-    #         # Clear the file by opening in write mode
-    #         with open(filepath, "w+") as f:
-    #             f.close()
+    # Clear existing files at the beginning
+    for section in section_types:
+        filepath = f"./xml_data/Aggregated_{section}.csv"
+        if os.path.exists(filepath):
+            # Clear the file by opening in write mode
+            with open(filepath, "w+") as f:
+                f.close()
     
     # Each xml file is handled and saved separately, before moving to next. 
     # Importantly, the results of every new patient is concatenated to the existing aggregated atlas. 
@@ -361,6 +239,95 @@ def process_all_paths(directory: str, valid_patients: list, metadata_paths: list
         print(f"Elapsed time for batch: {stop-start}")
     return
 
+def process_all_paths_no_diagnosis_filter(directory: str, valid_patients: list, batch_size: int = 10, 
+                                          hdf5: bool = True, config=None):
+    """
+    Process all XML files without filtering by diagnosis (HC/non-HC)
+    
+    Parameters:
+    -----------
+    directory : str
+        Directory containing XML files
+    valid_patients : list
+        List of valid patient IDs
+    batch_size : int, optional
+        Number of files to process in each batch
+    hdf5 : bool, optional
+        Whether to save as HDF5 (True) or CSV (False)
+    config : Config object, optional
+        Configuration object with paths
+    """
+    # Get all valid XML paths without filtering by diagnosis
+    paths = get_all_xml_paths(directory, valid_patients, config.METADATA_PATHS if config else None)
+    print(f"Found a total of {len(paths)} valid patient XML files.")
+    
+    # First, identify all section types that will be processed in next step
+    section_types = set()
+    for path in paths[:min(100, len(paths))]:  # Sample a subset to identify section types
+        try:
+            parsed_dict = xml_parser(path)
+            section_types.update(parsed_dict.keys())
+        except Exception as e:
+            print(f"Error parsing {path}: {e}")
+    
+    print(f"Found {len(section_types)} section types: {section_types}")
+    
+    # Determine output directory from config
+    output_dir = config.EXTRACTED_CSV_DIR if config else "./xml_data"
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # Clear existing files at the beginning
+    for section in section_types:
+        if hdf5:
+            filepath = os.path.join(output_dir, f"Aggregated_{section}.h5")
+        else:
+            filepath = os.path.join(output_dir, f"Aggregated_{section}.csv")
+            
+        if os.path.exists(filepath):
+            try:
+                if hdf5:
+                    # Create empty HDF5 file
+                    with h5py.File(filepath, "w") as f:
+                        pass
+                else:
+                    # Clear CSV file
+                    with open(filepath, "w+") as f:
+                        f.close()
+                print(f"Cleared existing file: {filepath}")
+            except Exception as e:
+                print(f"Error clearing file {filepath}: {e}")
+    
+    # Process files in batches
+    for i in range(0, len(paths), batch_size):
+        batch_paths = paths[i:i+batch_size]
+        print(f"Processing batch {i//batch_size + 1}/{(len(paths)-1)//batch_size + 1} ({len(batch_paths)} files)")
+        start = time.perf_counter()
+        
+        for idx, path in enumerate(batch_paths):
+            try:
+                parsed_dict = xml_parser(path)
+                
+                # Extract patient ID
+                match_no_ext = re.search(r"([^/\\]+)\.[^./\\]*$", path)
+                if match_no_ext:
+                    patient_id = match_no_ext.group(1)
+                    new_match = re.search(r"catROI_(.+)", patient_id)
+                    if new_match:
+                        patient_id = new_match.group(1)
+                    
+                    # Save data without differentiating between HC/non-HC
+                    if hdf5:
+                        dict_to_hdf5(parsed_dict, patient=patient_id, ext="h5", config=config)
+                    else:
+                        dict_to_df(parsed_dict, patient=patient_id, ext="csv", config=config)
+            except Exception as e:
+                print(f"Error processing file {idx+1}/{len(batch_paths)}: {path}\nError: {e}")
+        
+        stop = time.perf_counter()
+        print(f"Elapsed time for batch: {stop-start:.2f} seconds")
+    
+    print("Finished processing all files!")
+    return
 
 
 def valid_patients(paths: list) -> list:

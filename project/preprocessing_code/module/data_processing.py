@@ -192,12 +192,12 @@ def load_mri_data_2D(
     else:
         data = pd.read_csv(data_path, header=[0, 1], index_col=0)
 
-    if train:
-            data.to_csv(f".data/train_processed_data/Proc_{atlas_name}.csv")
-            all_file_names = data.columns
-    else:
-        data.to_csv(f".data/test_processed_data/Proc_{atlas_name}.csv")
-        all_file_names = data.columns
+    # if train:
+    #         data.to_csv(f".data/train_processed_data/Proc_{atlas_name}.csv")
+    #         all_file_names = data.columns
+    # else:
+    #     data.to_csv(f".data/test_processed_data/Proc_{atlas_name}.csv")
+    #     all_file_names = data.columns
     
     # data.set_index("Filename", inplace=True)
     data = normalize_and_scale_df(data)
@@ -323,12 +323,12 @@ def load_mri_data_2D_all_atlases(
         data = normalize_and_scale_df(data)
         atlas_name = data_path.stem
         
-        if train:
-            data.to_csv(f".data/train_processed_data/Proc_{atlas_name}.csv")
-            all_file_names = data.columns
-        else:
-            data.to_csv(f".data/test_processed_data/Proc_{atlas_name}.csv")
-            all_file_names = data.columns
+        # if train:
+        #     data.to_csv(f".data/train_processed_data/Proc_{atlas_name}.csv")
+        #     all_file_names = data.columns
+        # else:
+        #     data.to_csv(f".data/test_processed_data/Proc_{atlas_name}.csv")
+        #     all_file_names = data.columns
 
         for index, row in data_overview.iterrows():
             

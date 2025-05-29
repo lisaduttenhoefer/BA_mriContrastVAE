@@ -27,14 +27,17 @@ matplotlib.use("Agg")
 
 sys.path.append("../src")
 
-from models.ContrastVAE_2D_f import ContrastVAE_2D
-from utils.support_f import get_all_data, split_df_adapt, combine_dfs
+from models.ContrastVAE_2D import (
+    NormativeVAE_2D, 
+    train_normative_model_plots,
+    bootstrap_train_normative_models_plots
+)
+
+from utils.support_f import split_df_adapt
 from utils.config_utils_model import Config_2D
 
 from module.data_processing_hc import (
     load_checkpoint_model, 
-    load_mri_data_2D_all_atlases,
-    #load_mri_data_2D_combined, 
     load_mri_data_2D,
     process_subjects, 
     train_val_split_annotations,
@@ -56,11 +59,6 @@ from utils.plotting_utils import (
     plot_bootstrap_metrics,
 )
 
-from models.ContrastVAE_2D_dev import (
-    NormativeVAE, 
-    train_normative_model_plots,
-    bootstrap_train_normative_models_plots
-)
 
 # Use non-interactive plotting to avoid tmux crashes
 matplotlib.use("Agg")
@@ -72,7 +70,7 @@ def create_arg_parser():
     parser.add_argument('--n_bootstraps', help='Number of bootstrap samples', type=int, default=100)
     parser.add_argument('--norm_diagnosis', help='which diagnosis is considered the "norm"', type=str, default="HC")
     parser.add_argument('--train_ratio', help='Normpslit ratio', type=float, default=0.7)
-    parser.add_argument('--batch_size', help='Batch size', type=int, default=32)
+    parser.add_argument('--batch_size', help='Batch size', type=int, default=16)
     parser.add_argument('--learning_rate', help='Learning rate', type=float, default=0.000559) #4e-5
     parser.add_argument('--latent_dim', help='Dimension of latent space', type=int, default=20) 
     parser.add_argument('--kldiv_weight', help='Weight for KL divergence loss', type=float, default=1.4656)  #vor tuning:4.0
@@ -93,8 +91,8 @@ def main(atlas_name: list, num_epochs: int, n_bootstraps: int,norm_diagnosis: st
          latent_dim: int, kldiv_weight: float, save_models: bool, no_cuda: bool, seed: int, output_dir: str = None):
     ## 0. Set Up ----------------------------------------------------------
     # Set main paths
-    path_original = "/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/metadata_20250110/full_data_train_valid_test.csv"
-    path_to_dir = "/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data_training"
+    path_original = "/workspace/project/catatonia_VAE-main_bq/metadata_20250110/full_data_train_valid_test.csv"
+    path_to_dir = "/workspace/project/catatonia_VAE-main_bq/data_training"
     TRAIN_CSV, TEST_CSV = split_df_adapt(path_original, path_to_dir,norm_diagnosis,train_ratio,seed)
     
     joined_atlas_name = "_".join(str(a) for a in atlas_name if isinstance(a, str))
@@ -102,7 +100,7 @@ def main(atlas_name: list, num_epochs: int, n_bootstraps: int,norm_diagnosis: st
     # Create output directory
     timestamp = datetime.now().strftime("%Y%m%d_%H%M")
     if output_dir is None:
-        save_dir = f"/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/analysis/TRAINING/norm_results_{norm_diagnosis}_{train_ratio}_{joined_atlas_name}_{timestamp}"
+        save_dir = f"/workspace/project/catatonia_VAE-main_bq/analysis/TRAINING/norm_results_{norm_diagnosis}_{train_ratio}_{joined_atlas_name}_{timestamp}"
     else:
         save_dir = output_dir
         
@@ -122,15 +120,13 @@ def main(atlas_name: list, num_epochs: int, n_bootstraps: int,norm_diagnosis: st
         # Input / Output Paths
         TRAIN_CSV=[TRAIN_CSV],
         TEST_CSV=[TEST_CSV],
-        # TRAIN_CSV=["/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data_training/training_metadata.csv"],
-        # TEST_CSV=["/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data_training/testing_metadata.csv"],
-        MRI_DATA_PATH="/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data/all_csv_data",
+        MRI_DATA_PATH="/workspace/project/catatonia_VAE-main_bq/data/all_csv_data",
         ATLAS_NAME=atlas_name,
-        PROC_DATA_PATH="/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data_training/proc_extracted_xml_data",
+        PROC_DATA_PATH="/workspace/project/catatonia_VAE-main_bq/data_training/proc_extracted_xml_data",
         OUTPUT_DIR=save_dir,
         # load_mri_data parameters
         VOLUME_TYPE= "Vgm",
-        VALID_VOLUME_TYPES=["Vgm", "Vwm", "csf"],
+        VALID_VOLUME_TYPES=["Vgm", "Vwm", "Vcsf"],
         # Loading Model
         LOAD_MODEL=False,
         PRETRAIN_MODEL_PATH=None,
@@ -291,13 +287,16 @@ def main(atlas_name: list, num_epochs: int, n_bootstraps: int,norm_diagnosis: st
     
     
     # Initialize the normative VAE model
-    normative_model = NormativeVAE(
+    normative_model = NormativeVAE_2D(
         input_dim=len_atlas,
         hidden_dim_1=hidden_dim_1,
         hidden_dim_2=hidden_dim_2,
         latent_dim=config.LATENT_DIM,
         learning_rate=config.LEARNING_RATE,
         kldiv_loss_weight=config.KLDIV_LOSS_WEIGHT,
+        recon_loss_weight=config.RECON_LOSS_WEIGHT,
+        contr_loss_weight=config.CONTR_LOSS_WEIGHT,
+
         dropout_prob=0.1,
         device=device
     )
@@ -401,5 +400,4 @@ if __name__ == "__main__":
     
     # Final log message
     print(f"Normative modeling complete. Results saved to {save_dir}")
-
 

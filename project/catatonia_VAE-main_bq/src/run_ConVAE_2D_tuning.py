@@ -76,13 +76,13 @@ def tune_ContrastVAE(
         # General Parameters
         RUN_NAME=run_name,
         # Input / Output Paths
-        TEST_CSV=["/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data_training/testing_metadata.csv"],  # For WhiteCAT, NSS, NU metadata
-        TRAIN_CSV=["/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data_training/training_metadata.csv"],  # For all other metadata
-        MRI_DATA_PATH_TRAIN="/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data/train_xml_data", # This is the h5 file!  
-        MRI_DATA_PATH_TEST="/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data/test_xml_data",
+        TEST_CSV=["/workspace/project/catatonia_VAE-main_bq/data_training/testing_metadata.csv"],  # For WhiteCAT, NSS, NU metadata
+        TRAIN_CSV=["/workspace/project/catatonia_VAE-main_bq/data_training/training_metadata.csv"],  # For all other metadata
+        MRI_DATA_PATH_TRAIN="/workspace/project/catatonia_VAE-main_bq/data/train_xml_data", # This is the h5 file!  
+        MRI_DATA_PATH_TEST="/workspace/project/catatonia_VAE-main_bq/data/test_xml_data",
         ATLAS_NAME=atlas_name,
-        PROC_DATA_PATH="/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data/proc_extracted_xml_data",
-        OUTPUT_DIR="/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/analysis/TUNING",
+        PROC_DATA_PATH="/workspace/project/catatonia_VAE-main_bq/data/proc_extracted_xml_data",
+        OUTPUT_DIR="/workspace/project/catatonia_VAE-main_bq/analysis/TUNING",
         VOLUME_TYPE= "Vgm",
         VALID_VOLUME_TYPES=["Vgm", "Vwm", "csf"],
         # Loading Model
@@ -285,9 +285,9 @@ if __name__ == "__main__":
     num_epochs = int(num_epochs)
 
     # Set the local_dir with the file:// scheme
-    local_dir = f"file:///raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/analysis/ray_results"
+    local_dir = f"file:///workspace/project/catatonia_VAE-main_bq/analysis/ray_results"
 
-    os.makedirs(f"/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/analysis/ray_results", exist_ok=True)
+    os.makedirs(f"/workspace/project/catatonia_VAE-main_bq/analysis/ray_results", exist_ok=True)
 
     tuner = tune.Tuner(
         tune.with_resources(
@@ -334,8 +334,8 @@ if __name__ == "__main__":
     print(analysis.get_dataframe(filter_metric="t_recon_loss", filter_mode="min"))
 
     # results = analysis.get_dataframe(filter_metric="t_recon_loss", filter_mode="min")
-    # results.to_csv(f"/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/analysis/ray_results/ray_results_{atlas_name}.csv")
+    # results.to_csv(f"/workspace/project/catatonia_VAE-main_bq/analysis/ray_results/ray_results_{atlas_name}.csv")
 
     results = analysis.get_dataframe(filter_metric="t_recon_loss", filter_mode="min")
     print(results.head())  # Shows top-ranked trials
-    results.to_csv(f"/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/analysis/best_tuning_results.csv")
+    results.to_csv(f"/workspace/project/catatonia_VAE-main_bq/analysis/best_tuning_results.csv")

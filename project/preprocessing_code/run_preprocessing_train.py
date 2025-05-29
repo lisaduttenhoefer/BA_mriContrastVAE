@@ -1,14 +1,13 @@
 import pathlib
-
 from utils.config_utils import Config
-from module.parser_v2 import valid_patients, process_all_paths
+from module.parser_v2 import valid_patients, process_all_paths_no_diagnosis_filter
 from module.data_processing import load_mri_data_2D, load_mri_data_2D_all_atlases
 
 
 config_train = Config(
     RAW_DATA_DIR = "/net/data.isilon/ag-cherrmann/stumrani/mri_prep",  #"/net/data.isilon/ag-cherrmann/stumrani/mri_prep",
-    EXTRACTED_CSV_DIR = "/raid/bq_lduttenhofer/project/preprocessing_code/data/train_xml_data",
-    EXTRACTED_CSV_T_DIR = "/raid/bq_lduttenhofer/project/preprocessing_code/data/train_xml_data_t",
+    EXTRACTED_CSV_DIR = "/raid/bq_lduttenhofer/project/preprocessing_code/data/all_xml_data",
+    EXTRACTED_CSV_T_DIR = "/raid/bq_lduttenhofer/project/preprocessing_code/data/all_xml_data_t",
     PROCESSED_CSV_DIR = "/raid/bq_lduttenhofer/project/preprocessing_code/data/train_processed_data",
     METADATA_PATHS = ["/raid/bq_lduttenhofer/project/preprocessing_code/metadata_20250110/full_data_train_valid_test.csv",
                       "/raid/bq_lduttenhofer/project/preprocessing_code/metadata_20250110/meta_data_NSS_all_variables.csv",
@@ -25,11 +24,11 @@ def get_all_data(directory: str, ext: str = "h5") -> list:
 
 valid_patients = valid_patients(config_train.METADATA_PATHS)
 
-process_all_paths(directory=config_train.RAW_DATA_DIR,
+process_all_paths_no_diagnosis_filter(directory=config_train.RAW_DATA_DIR,
                   valid_patients=valid_patients,
-                  metadata_paths=config_train.METADATA_PATHS,
+                  #metadata_paths=config_train.METADATA_PATHS,
                   batch_size=10,
-                  train=True,  # Get non-HC patients
+                  #train=True,  # Get non-HC patients
                   hdf5=True,
                   config=config_train)
 

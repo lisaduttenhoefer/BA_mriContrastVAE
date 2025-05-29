@@ -5,13 +5,9 @@ from typing import List
 
 import torch
 
-'''
-Config class to set up all parameters for model preparation and training. Is used with the run_ModelXYZ.py scripts.
-'''
-
 def get_free_gpu() -> torch.device:
     """
-    Get the GPU with the most available memory, with improved error handling.
+    Get the GPU with the most available memory,
     Falls back to CPU if no GPU is available or if there's an error accessing the GPUs.
     
     Returns:s
@@ -66,33 +62,8 @@ def get_free_gpu() -> torch.device:
         print(f"Unexpected error selecting GPU: {e}")
         print("Falling back to CPU")
         return torch.device("cpu")
-    
-# # Get the GPU with the most memory capacity
-# def get_free_gpu() -> torch.device:
-
-#     # check if cuda is available
-#     if torch.cuda.is_available():
-#         # run nvidia-smi command to get data on free memory
-#         command = "nvidia-smi --query-gpu=memory.free --format=csv"
-#         memory_free_info = (
-#             sp.check_output(command.split()).decode("ascii").split("\n")[:-1][1:]
-#         )
-#         # extract memory values
-#         memory_free_values = [int(x.split()[0]) for i, x in enumerate(memory_free_info)]
-
-#         # return gpu with the most free memory
-#         gpu = f"cuda:{memory_free_values.index(max(memory_free_values))}"
-
-#     # if cuda isn't available, run on cpu
-#     else:
-#         gpu = "cpu"
-
-#     # return the device with the most free memory
-#     return torch.device(gpu)
 
 
-
-# Set up all parameters for model preparation and training
 class Config_2D:
 
     def __init__(
@@ -116,7 +87,6 @@ class Config_2D:
         RUN_NAME: str,
         # The path to the csv files (contains metadata and filenames of MRI .nii files)
         TRAIN_CSV: List[str],
-        #VALID_CSV: List[str],
         # The paths to the csv files that contain metadata for the testing data
         TEST_CSV: List[str],
         # Name of atlas which should be used for training of the model
@@ -125,20 +95,16 @@ class Config_2D:
         PROC_DATA_PATH: str,
         # The path to the directory that contains the MRI .nii files
         MRI_DATA_PATH: str,
-        # MRI_DATA_PATH_TRAIN: str,
-        # MRI_DATA_PATH_TEST: str,
         # The folder in which a training specific output directory should be created
         OUTPUT_DIR: str,
         # The column names, from the CSVs, that contain the covariates that you want to be attached to the Subject objects
-        # Covariates will be one-hot encoded. Diagnoses is always included. ClassCVAE requires Dataset to be included.
-        # COVARS: List[str],
-        # The list of diagnoses that you want to include in training. One-hot encoded Diagnosis information will always
-        # be appended to the Subjects object.
+        # The list of diagnoses that you want to include in training. 
         DIAGNOSES: List[str],
-        # Whether to use the Structural Similarity Index (SSIM) as a loss function for reconstruction loss.
-        # Not all models support this.
-        VOLUME_TYPE: str,
+        # The list of volume types you want to include (Vgm, Vwm, csf)
+        VOLUME_TYPE: List[str],
+        #The list of volume types that are known
         VALID_VOLUME_TYPES: List[str],
+        # Whether to use the Structural Similarity Index (SSIM) as a loss function for reconstruction loss.
         USE_SSIM: bool = False,
         # Whether to use early stopping during training, based on the LR being too low.
         EARLY_STOPPING: bool = True,
@@ -190,24 +156,13 @@ class Config_2D:
         DEVICE: torch.device = None,
         # A timestamp for the run. If None, the current time will be used. Timestamp will be in output directory name.
         TIMESTAMP: str = None,
-
-        # TRAINED_MODEL_PATH: str = None, 
-        # BLR_TEST_SIZE: int = 0.2,
-        # BLR_RANDOM_SEED: int = 42, 
-        # BLR_COVARIATES: List["Age", "Sex"],
-        # STANDARIZE_FEATURES: bool = True,
-        # ROI_COLUMNS: List[str],
-        # VIS_TOP_ROIS: int=15 ,
-        # VIS_SCATTER_ROIS: int=5 , 
-        # VIS_FIG_LARGE: List[14, 10],
-        # VIS_FIG_MEDIUM: List[12, 8] ,
-        # VIS_FIG_SMALL: List[10,6], 
-        # COLOR_PALETTE: str = "coolwarm"
-
-
+        NUM_WORKERS = 2,  # Reduce if causing memory issues
+        PIN_MEMORY = True,
+        DROP_LAST = True,
+        # Memory management settings
+        CLEAR_CACHE_FREQUENCY = 10,  # Clear cache every N batches
+        EMERGENCY_CLEANUP_ON_ERROR = True
     ):
-
-        # set up training parameters ------------------------------------------------
 
         # set up mandatory training parameters
         self.LEARNING_RATE = LEARNING_RATE
@@ -221,7 +176,6 @@ class Config_2D:
         self.CLASS_LOSS_WEIGHT = CLASS_LOSS_WEIGHT
         self.CONTRAST_TEMPERATURE = CONTRAST_TEMPERATURE
         self.TOTAL_EPOCHS = TOTAL_EPOCHS
-        ###
         self.VOLUME_TYPE = VOLUME_TYPE
         self.VALID_VOLUME_TYPES = VALID_VOLUME_TYPES
         # self.COVARS = COVARS
@@ -238,6 +192,14 @@ class Config_2D:
         self.SCHEDULE_ON_VALIDATION = SCHEDULE_ON_VALIDATION
         self.SCHEDULER_PATIENCE = SCHEDULER_PATIENCE
         self.SCHEDULER_FACTOR = SCHEDULER_FACTOR
+        self.BATCH_SIZE = BATCH_SIZE # Start small and increase if memory allows
+        self.NUM_WORKERS = NUM_WORKERS  # Reduce if causing memory issues
+        self.PIN_MEMORY = PIN_MEMORY
+        self.DROP_LAST = DROP_LAST
+
+        # Memory management settings
+        self.CLEAR_CACHE_FREQUENCY = CLEAR_CACHE_FREQUENCY  # Clear cache every N batches
+        self.EMERGENCY_CLEANUP_ON_ERROR = EMERGENCY_CLEANUP_ON_ERROR
 
         # training stop parameters
         self.EARLY_STOPPING = EARLY_STOPPING
@@ -288,8 +250,6 @@ class Config_2D:
         self.TRAIN_CSV = TRAIN_CSV
         self.ADVER_CSV = ADVER_CSV
         self.MRI_DATA_PATH = MRI_DATA_PATH
-        # self.MRI_DATA_PATH_TRAIN = MRI_DATA_PATH_TRAIN
-        # self.MRI_DATA_PATH_TEST = MRI_DATA_PATH_TEST
         self.PROC_DATA_PATH = PROC_DATA_PATH
         self.ATLAS_NAME = ATLAS_NAME
         self.TEST_CSV = TEST_CSV
@@ -300,29 +260,10 @@ class Config_2D:
         else:
             self.RUN_NAME = RUN_NAME
 
-        # self.OUTPUT_DIR = os.path.join(
-        #     self.OUTPUT_DIR, f"{self.TIMESTAMP}_{self.RUN_NAME}"
-        # )
         self.FIGURES_DIR = os.path.join(self.OUTPUT_DIR, "figures")
         self.LOGGING_DIR = os.path.join(self.OUTPUT_DIR, "logs")
         self.DATA_DIR = os.path.join(self.OUTPUT_DIR, "data")
         self.MODEL_DIR = os.path.join(self.OUTPUT_DIR, "models")
-
-        # # set up run specific output directories
-        # for path in [
-        #     self.OUTPUT_DIR,
-        #     self.FIGURES_DIR,
-        #     self.LOGGING_DIR,
-        #     self.DATA_DIR,
-        #     self.MODEL_DIR,
-        # ]:
-            # # make sure it doesn't already exist
-            # assert not os.path.exists(
-            #     path
-            # ), f"Path {path} already exists, and may be overwritten. Please rename or remove it."
-
-            # # create the directory
-            # os.makedirs(path)
 
     def __str__(self):
         return str(vars(self))

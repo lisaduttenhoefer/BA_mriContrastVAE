@@ -66,7 +66,7 @@ def main(args):
     
     # Extract model name from the model directory for consistent naming
     model_name = os.path.basename(model_dir)
-    save_dir = f"{args.output_dir}/clinical_deviations_{model_name}_{timestamp}" if args.output_dir else f"/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/analysis/TESTING/deviation_results_{model_name}_{timestamp}"
+    save_dir = f"{args.output_dir}/clinical_deviations_{model_name}_{timestamp}" if args.output_dir else f"/workspace/project/catatonia_VAE-main_bq/analysis/TESTING/deviation_results_{model_name}_{timestamp}"
     os.makedirs(save_dir, exist_ok=True)
     os.makedirs(f"{save_dir}/figures", exist_ok=True)
     # Set up logging
@@ -96,7 +96,7 @@ def main(args):
         latent_dim = int(config_df["LATENT_DIM"].iloc[0])
         norm_diagnosis = config_df["DIAGNOSES"].iloc[0] if "DIAGNOSES" in config_df.columns else args.norm_diagnosis
         volume_type = config_df["VOLUME_TYPE"].iloc[0] if "VOLUME_TYPE" in config_df.columns else "Vgm"
-        valid_volume_types = eval(config_df["VALID_VOLUME_TYPES"].iloc[0]) if "VALID_VOLUME_TYPES" in config_df.columns else ["Vgm", "Vwm", "csf"]
+        valid_volume_types = eval(config_df["VALID_VOLUME_TYPES"].iloc[0]) if "VALID_VOLUME_TYPES" in config_df.columns else ["Vgm", "Vwm", "Vcsf"]
         metadata_test = config_df["TEST_CSV"].iloc[0] if "TEST_CSV" in config_df.columns else args.clinical_csv
         # Training data path from config
         mri_data_path = config_df["MRI_DATA_PATH"].iloc[0] if "MRI_DATA_PATH" in config_df.columns else None
@@ -122,7 +122,7 @@ def main(args):
         # latent_dim = args.latent_dim
         # norm_diagnosis = args.norm_diagnosis
         # volume_type = "Vgm"
-        # valid_volume_types = ["Vgm", "Vwm", "csf"]
+        # valid_volume_types = ["Vgm", "Vwm", "Vcsf"]
         # mri_data_path = mri_data_path
         # metadata_test = args.testing_data
         # hidden_dim_1 = 100

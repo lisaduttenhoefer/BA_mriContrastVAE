@@ -334,7 +334,7 @@ def load_mri_data_2D(
     train_or_test: str = "train",
     save: bool = False,
     volume_type: str = None,
-    valid_volume_types: List[str] = ["Vgm", "Vwm", "csf"],
+    valid_volume_types: List[str] = ["Vgm", "Vwm", "Vcsf"],
 ) -> Tuple:
     
     # Define all available atlases
@@ -454,7 +454,7 @@ def load_mri_data_2D(
         # Save processed data if needed
         if save:
             volume_suffix = "_all" if volume_type == "all" else f"_{volume_type}"
-            save_path = f"data/proc_extracted_xml_data/Proc_{atlas}{volume_suffix}_{train_or_test}.csv"
+            save_path = f"/workspace/project/catatonia_VAE-main_bq/data/proc_extracted_xml_data/Proc_{atlas}{volume_suffix}_{train_or_test}.csv"
             data.to_csv(save_path)
         
         # Process each subject for this atlas
@@ -525,7 +525,7 @@ def load_mri_data_2D_all_atlases(
     # Which volume type to use for analysis (Vgm, Vwm, csf, or all)
     volume_type: str = None,
     # List of valid volume types that can be specified
-    valid_volume_types: List[str] = ["Vgm", "Vwm", "csf"],
+    valid_volume_types: List[str] = ["Vgm", "Vwm", "Vcsf"],
 ) -> Tuple:
     """
     Load and process MRI data from multiple atlases.
@@ -636,7 +636,7 @@ def load_mri_data_2D_all_atlases(
         # Save processed data if needed
         if save:
             volume_suffix = "_all" if volume_type == "all" else f"_{volume_type}"
-            save_path = f"data/proc_extracted_xml_data/Proc_{atlas}{volume_suffix}_{train_or_test}.csv"
+            save_path = f"/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data/proc_extracted_xml_data/Proc_{atlas}{volume_suffix}_{train_or_test}.csv"
             data.to_csv(save_path)
             
         # Process each subject for this atlas
