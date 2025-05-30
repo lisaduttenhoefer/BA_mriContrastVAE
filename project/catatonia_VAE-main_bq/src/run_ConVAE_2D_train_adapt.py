@@ -66,6 +66,7 @@ matplotlib.use("Agg")
 def create_arg_parser():
     parser = argparse.ArgumentParser(description='Arguments for Normative Modeling Training')
     parser.add_argument('--atlas_name', help='Name of the desired atlas for training.',  nargs='+', default=["all"])
+    parser.add_argument('--volume_type', help='Volume type(s) to use', nargs='*', default=["Vgm", "Vwm", "Vcsf"])
     parser.add_argument('--num_epochs', help='Number of epochs to be trained for', type=int, default=200)
     parser.add_argument('--n_bootstraps', help='Number of bootstrap samples', type=int, default=100)
     parser.add_argument('--norm_diagnosis', help='which diagnosis is considered the "norm"', type=str, default="HC")
@@ -73,7 +74,7 @@ def create_arg_parser():
     parser.add_argument('--batch_size', help='Batch size', type=int, default=16)
     parser.add_argument('--learning_rate', help='Learning rate', type=float, default=0.000559) #4e-5
     parser.add_argument('--latent_dim', help='Dimension of latent space', type=int, default=20) 
-    parser.add_argument('--kldiv_weight', help='Weight for KL divergence loss', type=float, default=1.4656)  #vor tuning:4.0
+    parser.add_argument('--kldiv_weight', help='Weight for KL divergence loss', type=float, default=1.2)  #vor tuning:4.0
     parser.add_argument('--save_models', help='Save all bootstrap models', action='store_true', default=True)
     parser.add_argument('--no_cuda', help='Disable CUDA (use CPU only)', action='store_true')
     parser.add_argument('--seed', help='Random seed for reproducibility', type=int, default=42)
@@ -87,20 +88,20 @@ def extract_measurements(subjects):
         all_measurements.append(torch.tensor(subject["measurements"]).squeeze())
     return torch.stack(all_measurements)
 
-def main(atlas_name: list, num_epochs: int, n_bootstraps: int,norm_diagnosis: str, train_ratio: float, batch_size: int, learning_rate: float, 
+def main(atlas_name: list,volume_type, num_epochs: int, n_bootstraps: int,norm_diagnosis: str, train_ratio: float, batch_size: int, learning_rate: float, 
          latent_dim: int, kldiv_weight: float, save_models: bool, no_cuda: bool, seed: int, output_dir: str = None):
     ## 0. Set Up ----------------------------------------------------------
     # Set main paths
-    path_original = "/workspace/project/catatonia_VAE-main_bq/metadata_20250110/full_data_train_valid_test.csv"
+    path_original = "/workspace/project/catatonia_VAE-main_bq/metadata_20250110/full_data_with_codiagnosis_and_scores.csv"
     path_to_dir = "/workspace/project/catatonia_VAE-main_bq/data_training"
     TRAIN_CSV, TEST_CSV = split_df_adapt(path_original, path_to_dir,norm_diagnosis,train_ratio,seed)
     
     joined_atlas_name = "_".join(str(a) for a in atlas_name if isinstance(a, str))
-
+    joined_volume_name = "_".join(str(a) for a in volume_type if isinstance(a, str))
     # Create output directory
     timestamp = datetime.now().strftime("%Y%m%d_%H%M")
     if output_dir is None:
-        save_dir = f"/workspace/project/catatonia_VAE-main_bq/analysis/TRAINING/norm_results_{norm_diagnosis}_{train_ratio}_{joined_atlas_name}_{timestamp}"
+        save_dir = f"/workspace/project/catatonia_VAE-main_bq/analysis/TRAINING/norm_results_{norm_diagnosis}_{joined_volume_name}_{joined_atlas_name}_{timestamp}"
     else:
         save_dir = output_dir
         
@@ -125,7 +126,7 @@ def main(atlas_name: list, num_epochs: int, n_bootstraps: int,norm_diagnosis: st
         PROC_DATA_PATH="/workspace/project/catatonia_VAE-main_bq/data_training/proc_extracted_xml_data",
         OUTPUT_DIR=save_dir,
         # load_mri_data parameters
-        VOLUME_TYPE= "Vgm",
+        VOLUME_TYPE=volume_type,
         VALID_VOLUME_TYPES=["Vgm", "Vwm", "Vcsf"],
         # Loading Model
         LOAD_MODEL=False,
@@ -296,7 +297,6 @@ def main(atlas_name: list, num_epochs: int, n_bootstraps: int,norm_diagnosis: st
         kldiv_loss_weight=config.KLDIV_LOSS_WEIGHT,
         recon_loss_weight=config.RECON_LOSS_WEIGHT,
         contr_loss_weight=config.CONTR_LOSS_WEIGHT,
-
         dropout_prob=0.1,
         device=device
     )
@@ -380,12 +380,19 @@ if __name__ == "__main__":
     # Parse command line arguments
     parser = create_arg_parser()
     args = parser.parse_args()
+
+    volume_type_arg = args.volume_type
+    if len(volume_type_arg) == 1 and volume_type_arg[0] == "all":
+        volume_type_arg = "all"
+    elif len(volume_type_arg) == 1:
+        volume_type_arg = volume_type_arg[0]
     
     # Run the main function with parsed arguments
     save_dir, bootstrap_models, bootstrap_metrics = main(
         atlas_name=args.atlas_name,
         num_epochs=args.num_epochs,
         norm_diagnosis=args.norm_diagnosis,
+        volume_type=volume_type_arg, 
         train_ratio=args.train_ratio,
         n_bootstraps=args.n_bootstraps,
         batch_size=args.batch_size,

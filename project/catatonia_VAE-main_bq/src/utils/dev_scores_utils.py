@@ -193,8 +193,8 @@ def plot_deviation_distributions(results_df, save_dir):
     os.makedirs(f"{save_dir}/figures/distributions", exist_ok=True)
     
     # Create color palette
-    palette = sns.light_palette("blue", n_colors=4, reverse=True)
-    diagnosis_order = ["HC", "SCHZ", "CTT", "MDD"]
+    palette = sns.light_palette("blue", n_colors=6, reverse=True)
+    diagnosis_order = ["HC", "SCHZ", "MDD", "CTT", "CTT-MDD", "CTT-SCHZ"]
     diagnosis_palette = dict(zip(diagnosis_order, palette))
 
     #########
@@ -287,7 +287,7 @@ def plot_deviation_distributions(results_df, save_dir):
     plt.close()
     
     # Create summary table with p-value statistics
-    selected_diagnoses = ["SCHZ", "CTT", "MDD", "HC"]
+    selected_diagnoses = ["HC", "SCHZ", "MDD", "CTT", "CTT-MDD", "CTT-SCHZ"]
     metrics = ["reconstruction_error", "kl_divergence", "deviation_score"]
     p_cols = ["p_value_recon", "p_value_kl", "p_value_combined"]
     
@@ -420,42 +420,72 @@ def plot_deviation_distributions(results_df, save_dir):
     plt.savefig(f"{save_dir}/figures/distributions/metrics_violin_plots.png", dpi=300)
     plt.close()
 
-    selected_diagnoses = ["SCHZ", "CTT", "MDD","HC"]
+    selected_diagnoses = ["HC", "SCHZ", "MDD", "CTT", "CTT-MDD", "CTT-SCHZ"]
 
     # Berechne Mittelwert, Standardabweichung und n für alle drei Metriken
     metrics = ["reconstruction_error", "kl_divergence", "deviation_score"]
     summary_dict = {}
 
+    metrics = ["reconstruction_error", "kl_divergence", "deviation_score"]
+    summary_dict = {}
+
     for metric in metrics:
+        # Filtere die Daten für ausgewählte Diagnosen
+        filtered_data = results_df[results_df["Diagnosis"].isin(selected_diagnoses)]
+        
+        # Berechne Summary Statistics (falls noch benötigt)
         summary_df = (
-            results_df[results_df["Diagnosis"].isin(selected_diagnoses)]
+            filtered_data
             .groupby("Diagnosis")[metric]
             .agg(['mean', 'std', 'count'])
             .reset_index()
         )
-
+        
         # Berechne 95%-Konfidenzintervall
         summary_df["ci95"] = 1.96 * summary_df["std"] / np.sqrt(summary_df["count"])
-
+        
         # Sortiere in gewünschter Reihenfolge (für Darstellung von unten nach oben)
         diagnosis_order = selected_diagnoses[::-1]
         summary_df["Diagnosis"] = pd.Categorical(summary_df["Diagnosis"], categories=diagnosis_order, ordered=True)
         summary_df = summary_df.sort_values("Diagnosis")
-
+        
         # Speichere die Zusammenfassung für späteren Zugriff
         summary_dict[metric] = summary_df
-
-        # Erstelle den Errorbar-Plot
-        plt.figure(figsize=(6, 4))
-        plt.errorbar(summary_df["mean"], summary_df["Diagnosis"], xerr=summary_df["ci95"],
-                    fmt='s', color='black', capsize=5, markersize=5)
+        
+        # Erstelle den Jitterplot anstatt Errorbar-Plot
+        plt.figure(figsize=(8, 6))
+        
+        # Filtere nur Diagnosen die tatsächlich Daten haben
+        available_diagnoses = filtered_data["Diagnosis"].unique()
+        plot_order = [d for d in diagnosis_order if d in available_diagnoses]
+        
+        # Get MDD color from the palette
+        mdd_color = diagnosis_palette.get('MDD', '#4c72b0')  # fallback to blue if MDD not found
+        
+        # Jitterplot mit einheitlicher Farbe (MDD-Farbe) und kleineren Punkten
+        sns.stripplot(data=filtered_data, y="Diagnosis", x=metric, 
+                    order=plot_order, color=mdd_color, 
+                    size=3, alpha=0.6, jitter=0.3)
+        
+        # Füge Errorbars (95% CI) in schwarz hinzu
+        for i, diagnosis in enumerate(plot_order):
+            diagnosis_data = summary_df[summary_df["Diagnosis"] == diagnosis]
+            if len(diagnosis_data) > 0:  # Prüfe ob Daten vorhanden sind
+                mean_val = diagnosis_data["mean"].iloc[0]
+                ci_val = diagnosis_data["ci95"].iloc[0]
+                plt.errorbar(mean_val, i, xerr=ci_val, fmt='none', 
+                            color='black', capsize=4, capthick=1.5, 
+                            elinewidth=1.5, alpha=0.8)
+        
         plt.title(f"{metric.replace('_', ' ').title()} by Diagnosis", fontsize=14)
         plt.xlabel("Deviation Metric", fontsize=12)
+        plt.ylabel("Diagnosis", fontsize=12)
+        
         sns.despine()
         plt.tight_layout()
-
+        
         # Speichere den Plot
-        plt.savefig(f"{save_dir}/figures/distributions/{metric}_errorbar.png", dpi=300)
+        plt.savefig(f"{save_dir}/figures/distributions/{metric}_jitterplot.png", dpi=300)
         plt.close()
     ############
     # Create comprehensive summary table and save as CSV
@@ -539,8 +569,8 @@ def visualize_embeddings(normative_models, data_tensor, annotations_df, device="
     
     # Plot
     plt.figure(figsize=(12, 10))
-    palette = sns.color_palette("colorblind", n_colors=4)
-    diagnosis_order = ["HC", "SCHZ", "CTT", "MDD"]
+    palette = sns.color_palette("colorblind", n_colors=6)
+    diagnosis_order = ["HC", "SCHZ", "MDD", "CTT", "CTT-MDD", "CTT-SCHZ"]
     diagnosis_colors = dict(zip(diagnosis_order, palette))
 
     sns.scatterplot(

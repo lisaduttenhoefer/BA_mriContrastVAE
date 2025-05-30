@@ -17,12 +17,12 @@ import re
 
 # Ensure we can import from parent directory
 sys.path.append("../src")
-from models.ContrastVAE_2D_dev import NormativeVAE
+from models.ContrastVAE_2D import NormativeVAE_2D
 from utils.support_f import get_all_data
 from utils.config_utils_model import Config_2D
 from module.data_processing_hc import (
     load_mri_data_2D,
-    load_mri_data_2D_all_atlases,
+    #load_mri_data_2D_all_atlases,
     #process_subjects,
 )
 from utils.logging_utils import (
@@ -96,6 +96,16 @@ def main(args):
         latent_dim = int(config_df["LATENT_DIM"].iloc[0])
         norm_diagnosis = config_df["DIAGNOSES"].iloc[0] if "DIAGNOSES" in config_df.columns else args.norm_diagnosis
         volume_type = config_df["VOLUME_TYPE"].iloc[0] if "VOLUME_TYPE" in config_df.columns else "Vgm"
+        learning_rate = int(config_df["LEARNING_RATE"].iloc[0])
+        kldiv_loss_weight = int(config_df["KLDIV_LOSS_WEIGHT"].iloc[0])
+        recon_loss_weight = int(config_df["RECON_LOSS_WEIGHT"].iloc[0])
+        contr_loss_weight = int(config_df["CONTR_LOSS_WEIGHT"].loc[0])
+
+        if volume_type.startswith('[') and volume_type.endswith(']'):
+            volume_type = eval(volume_type)  # Convert string representation to list
+        elif volume_type.startswith('"[') and volume_type.endswith(']"'):
+            volume_type = eval(volume_type.strip('"'))
+
         valid_volume_types = eval(config_df["VALID_VOLUME_TYPES"].iloc[0]) if "VALID_VOLUME_TYPES" in config_df.columns else ["Vgm", "Vwm", "Vcsf"]
         metadata_test = config_df["TEST_CSV"].iloc[0] if "TEST_CSV" in config_df.columns else args.clinical_csv
         # Training data path from config
@@ -160,7 +170,7 @@ def main(args):
         csv_paths=[metadata_test],
         data_path=path_to_clinical_data,
         atlas_name=atlas_name,
-        diagnoses=["HC", "SCHZ", "CTT", "MDD"],  # Only norm controls for normative model
+        diagnoses=["HC", "SCHZ", "CTT", "MDD", "CTT-MDD", "CTT-SCHZ"],  # Only norm controls for normative model
         hdf5=True,
         train_or_test="test",
         save=True,
@@ -205,15 +215,17 @@ def main(args):
     
     for model_file in model_files:
         # Initialize model architecture
-        model = NormativeVAE(
+        model = NormativeVAE_2D(
             input_dim=input_dim,
             hidden_dim_1=hidden_dim_1,
             hidden_dim_2=hidden_dim_2,
             latent_dim=latent_dim,
-            learning_rate=1e-4,  # Not used for inference
-            kldiv_loss_weight=1.0,  # Not used for inference
-            dropout_prob=0.0,  # Set to 0 for inference
-            device="cpu"  # Will move to appropriate device later
+            learning_rate=learning_rate,
+            kldiv_loss_weight=kldiv_loss_weight,
+            recon_loss_weight=recon_loss_weight,
+            contr_loss_weight=contr_loss_weight,
+            dropout_prob=0.1,
+            device=device
         )
         
         # Load model weights

@@ -3,6 +3,7 @@ import pandas as pd
 import regex as re
 import os
 import numpy as np
+from datetime import datetime
 
 
 def flatten_array(df: pd.DataFrame) -> np.ndarray:
@@ -163,8 +164,9 @@ def split_df_adapt(path_original: str, path_to_dir: str, norm_diagnosis: str = "
     test_data = pd.concat([test_norm, other_data])
     
     # Definiere die Ausgabepfade
-    path_train = f"{path_to_dir}/train_metadata{norm_diagnosis}_{train_ratio}.csv"
-    path_test = f"{path_to_dir}/test_metadata{norm_diagnosis}_{train_ratio}.csv"
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M")
+    path_train = f"{path_to_dir}/train_metadata{norm_diagnosis}_{train_ratio}{timestamp}.csv"
+    path_test = f"{path_to_dir}/test_metadata{norm_diagnosis}_{train_ratio}{timestamp}.csv"
     
     # Speichere die Datensätze
     train_norm.to_csv(path_train, index=False)

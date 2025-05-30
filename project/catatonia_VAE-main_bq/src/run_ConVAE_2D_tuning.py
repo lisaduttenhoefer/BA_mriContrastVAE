@@ -130,33 +130,20 @@ def tune_ContrastVAE(
 
     ## 1. Load Data and Initialize Model --------------------------------
     # Load train data
-    if config.ATLAS_NAME != "all":
-        subjects, annotations,roi_names = load_mri_data_2D(
-            csv_paths=config.TRAIN_CSV,
-            data_path=config.MRI_DATA_PATH_TRAIN,
-            atlas_name=atlas_name,
-            # covars=config.COVARS,
-            diagnoses=config.DIAGNOSES,
-            hdf5=True,
-            train_or_test="train",
-            save=False,
-            volume_type=config.VOLUME_TYPE,
-            valid_volume_types=config.VALID_VOLUME_TYPES,
-        )
-    else:
-        all_data_paths = get_all_data(directory=config.MRI_DATA_PATH_TRAIN, ext="h5")
-        
-        subjects, annotations, roi_names = load_mri_data_2D_all_atlases(
-            csv_paths=config.TRAIN_CSV,
-            data_paths=all_data_paths,
-            # covars=config.COVARS,
-            diagnoses=config.DIAGNOSES,
-            hdf5=True,
-            train_or_test="train",
-            save=False,
-            volume_type=config.VOLUME_TYPE,
-            valid_volume_types=config.VALID_VOLUME_TYPES,
-        )
+    
+    subjects, annotations,roi_names = load_mri_data_2D(
+        csv_paths=config.TRAIN_CSV,
+        data_path=config.MRI_DATA_PATH_TRAIN,
+        atlas_name=atlas_name,
+        # covars=config.COVARS,
+        diagnoses=config.DIAGNOSES,
+        hdf5=True,
+        train_or_test="train",
+        save=False,
+        volume_type=config.VOLUME_TYPE,
+        valid_volume_types=config.VALID_VOLUME_TYPES,
+    )
+
 
     len_atlas = len(subjects[0]["measurements"])
 

@@ -23,7 +23,7 @@ def flatten_array(df: pd.DataFrame) -> np.ndarray:
     return flat_array
 
 
-def normalize_and_scale_df(df: pd.DataFrame, ticv_column=None) -> pd.DataFrame:
+def normalize_and_scale_Pinaya(df: pd.DataFrame, ticv_column=None) -> pd.DataFrame:
     """
     Normalizes brain region volumes using the described preprocessing approach:
     1. Calculate relative volumes by dividing by total intracranial volume (if provided)
@@ -31,13 +31,6 @@ def normalize_and_scale_df(df: pd.DataFrame, ticv_column=None) -> pd.DataFrame:
     """
     df_copy = df.copy()
     
-    if ticv_column is not None:
-        ticv_values = df_copy[ticv_column]
-        if ticv_column in df_copy.columns:
-            df_copy = df_copy.drop(columns=[ticv_column])
-        for column in df_copy.columns:
-            df_copy[column] = df_copy[column] / ticv_values
-
     # Use a dictionary to store normalized columns
     normalized_data = {}
 
@@ -56,6 +49,101 @@ def normalize_and_scale_df(df: pd.DataFrame, ticv_column=None) -> pd.DataFrame:
     normalized_df = pd.DataFrame(normalized_data, index=df_copy.index)
 
     return normalized_df
+
+def normalize_and_scale_og(df: pd.DataFrame) -> pd.DataFrame:
+    # Normalizes the columns (patient volumes) by Min-Max Scaling and scales the rows (ROIs) with Z-transformation.
+
+    df_copy = df.copy()
+    column_sums = df_copy.sum()
+    
+    # Apply the formula: ln((10000*value)/sum_values + 1) "Log transformation"
+    # Alternatively for Min-Max Scaling applied to the columns: df_copy/df_copy.max() - Problem: Some rows have std = 0
+    transformed_df = np.log((10000 * df_copy) / column_sums + 1)
+
+    norm_copy = transformed_df.copy()
+
+    cols = norm_copy.columns.get_level_values(-1).tolist() # Select lowest level of Multiindex (Measurements: Vgm, Vwm, Vcsf)
+    unique_cols = list(set(cols))
+
+    for col_type in unique_cols:  # Z-scale each of the measurement types separately
+        cols_to_scale = [col for col in norm_copy.columns if col[-1] == col_type]
+
+        # Scale the selected columns per row
+        scaled = norm_copy[cols_to_scale].apply(
+            lambda row: (row - row.mean()) / row.std() if row.std() > 0 else pd.Series(0.0, index=row.index),
+            axis=1
+        )
+        
+        norm_copy.loc[:, cols_to_scale] = scaled
+
+    return norm_copy
+
+
+def normalize_and_scale_df(
+        df: pd.DataFrame, 
+        df_meta: pd.DataFrame, 
+        scaling_method: str = "z", 
+        scale_per_dataset: bool = False,
+        vol_to_use: str = None,
+        ) -> pd.DataFrame:
+    
+    # Normalizes the columns (patient volumes) by Log Scaling and scales the rows (ROIs) with Z-transformation.
+
+    df_copy = df.copy()
+    column_sums = df_copy.sum()
+    
+    # Apply the formula: ln((10000*value)/sum_values + 1) "Log transformation"
+    transformed_df = np.log((10000 * df_copy) / column_sums + 1)
+
+    norm_copy = transformed_df.copy()
+  
+    cols = norm_copy.columns.get_level_values(-1).tolist() # Select lowest level of Multiindex (Measurements: Vgm, Vwm, Vcsf)
+    unique_cols = list(set(cols))
+
+    filename_to_dataset_map = df_meta.set_index("Filename")["Dataset"]
+    filenames_in_data = norm_copy.columns.get_level_values(0).unique()
+    datasets = df_meta["Dataset"].unique().tolist()
+
+    for col_type in unique_cols:  # scale each of the measurement types separately
+        vols_to_scale = [col for col in norm_copy.columns if col[-1] == col_type]
+            
+        # Scale the selected columns per row
+        z_scaled = norm_copy[vols_to_scale]
+        iqr_scaled = df_copy[vols_to_scale]
+        
+        if scaling_method == "z":  # For z-scaling
+            z_scaled = z_scaled.apply(
+                lambda row: (row - row.mean()) / row.std() if row.std() > 0 else pd.Series(0.0, index=row.index),
+                axis=1
+            )
+
+        if scaling_method == "iqr":  # For inter-quantile-range scaling
+            iqr_scaled = iqr_scaled.apply(
+                lambda row: (row - row.median()) / (row.quantile(0.75)-row.quantile(0.25)) if (row.quantile(0.75)-row.quantile(0.25)) > 0 else pd.Series(0.0, index=row.index),
+                axis=1
+            )
+
+        # Output for z-scaled data
+        if scaling_method == "z":
+            norm_copy.loc[:, vols_to_scale] = z_scaled
+        
+        # Output for IQR scaled data
+        if scaling_method == "iqr":
+            df_copy.loc[:, vols_to_scale] = iqr_scaled
+    
+    if scaling_method == "z":
+        if vol_to_use is not None:  # Subset only a certain type of measurement (Vgm, Vwm, Vcsf)
+            subset = [col for col in norm_copy.columns if col[-1] == vol_to_use]
+            return norm_copy[subset]
+        else: 
+            return norm_copy
+    
+    if scaling_method == "iqr":
+        if vol_to_use is not None and scaling_method == "iqr":  # Subset only a certain type of measurement (Vgm, Vwm, Vcsf)
+            subset = [col for col in norm_copy.columns if col[-1] == vol_to_use]
+            return df_copy[subset]
+        else: 
+            return df_copy
 
 
 def get_all_data(directory: str, ext: str = "h5") -> list:
@@ -309,20 +397,19 @@ def read_hdf5_to_df(filepath: str) -> pd.DataFrame:
             print(f"[ERROR] Fallback also failed: {e2}")
             raise
 
-def combine_dfs(csv_paths: List[str]) -> pd.DataFrame:
-    """Combine multiple CSV files into a single DataFrame."""
-    dfs = []
-    for path in csv_paths:
-        df = pd.read_csv(path)
-        dfs.append(df)
-    return pd.concat(dfs, ignore_index=True)
+# def combine_dfs(csv_paths: List[str]) -> pd.DataFrame:
+#     """Combine multiple CSV files into a single DataFrame."""
+#     dfs = []
+#     for path in csv_paths:
+#         df = pd.read_csv(path)
+#         dfs.append(df)
+#     return pd.concat(dfs, ignore_index=True)
 
 def flatten_array(arr):
     """Flatten an array or series to 1D."""
     if isinstance(arr, pd.Series):
         return arr.values
     return arr.flatten() if hasattr(arr, 'flatten') else arr
-
 def load_mri_data_2D(
     data_path: str,
     atlas_name: List[str] = None,
@@ -333,7 +420,7 @@ def load_mri_data_2D(
     hdf5: bool = True,
     train_or_test: str = "train",
     save: bool = False,
-    volume_type: str = None,
+    volume_type = None,
     valid_volume_types: List[str] = ["Vgm", "Vwm", "Vcsf"],
 ) -> Tuple:
     
@@ -350,6 +437,19 @@ def load_mri_data_2D(
 
     print(f"[INFO] Processing atlases: {atlas_name}")
    
+   # NEUE LOGIK FÜR VOLUME_TYPE HANDLING
+    if volume_type == "all":
+        target_volume_types = valid_volume_types
+    elif isinstance(volume_type, str):
+        target_volume_types = [volume_type]
+    elif isinstance(volume_type, list):
+        target_volume_types = volume_type
+    else:
+        target_volume_types = valid_volume_types  # default fallback
+
+    print(f"[INFO] Processing atlases: {atlas_name}")
+    print(f"[INFO] Target volume types: {target_volume_types}")
+
     csv_paths = [path.strip("[]'\"") for path in csv_paths]
     # Handle CSV paths
     if csv_paths is not None:
@@ -368,16 +468,21 @@ def load_mri_data_2D(
     else:
         raise ValueError("[ERROR] No CSV path or annotations provided!")
     
-    data_overview = data_overview[data_overview["Diagnosis"].isin(diagnoses)]
-    # Handling diagnoses filtering
+    # Handling diagnoses filtering - MOVED BEFORE one-hot encoding
     if diagnoses is None:
         diagnoses = data_overview["Diagnosis"].unique().tolist()
+    
+    # Filter data_overview by diagnoses BEFORE creating one-hot labels
+    data_overview = data_overview[data_overview["Diagnosis"].isin(diagnoses)]
+    
+    # Reset index after filtering to ensure continuous indices
+    data_overview = data_overview.reset_index(drop=True)
     
     # Handling covariates and diagnoses lists
     covars = [covars] if not isinstance(covars, list) else covars
     diagnoses = [diagnoses] if not isinstance(diagnoses, list) else diagnoses
     
-    # Prepare one-hot encoded labels
+    # Prepare one-hot encoded labels AFTER filtering and resetting index
     one_hot_labels = {}
     variables = ["Diagnosis"] + covars
     
@@ -413,48 +518,53 @@ def load_mri_data_2D(
         # Extract unique patient IDs before flattening
         if isinstance(data.columns, pd.MultiIndex):
             all_file_names = data.columns.get_level_values(0).unique()
+            available_volume_types = data.columns.get_level_values(1).unique().tolist()
         else:
             all_file_names = data.columns
-           
+            available_volume_types = valid_volume_types  # fallback
+
         # Extract ROI names for this atlas
         base_roi_names = data.index.tolist()
         
-        # Validate volume type
-        if volume_type != "all" and volume_type not in valid_volume_types:
-            raise ValueError(f"[ERROR] Invalid volume_type: {volume_type}")
+        atlas_volume_types = [vt for vt in target_volume_types if vt in available_volume_types]
         
-        atlas_roi_names = []
-        if volume_type == "all":
-            atlas_roi_names = [f"{atlas}_{roi}_{vt}" for roi in base_roi_names for vt in valid_volume_types]
-        else:
-            atlas_roi_names = [f"{atlas}_{roi}_{volume_type}" for roi in base_roi_names]
+        if not atlas_volume_types:
+            print(f"[WARNING] No matching volume types found for atlas {atlas}. Available: {available_volume_types}, Requested: {target_volume_types}")
+            continue
+        
+        print(f"[INFO] Using volume types {atlas_volume_types} for atlas {atlas}")
+        
+        atlas_roi_names = [f"{atlas}_{roi}_{vt}" for roi in base_roi_names for vt in atlas_volume_types]
         
         # Add this atlas's ROI names to the overall list
         all_roi_names.extend(atlas_roi_names)
         print(f"[INFO] Added {len(atlas_roi_names)} ROI names from atlas {atlas}")
         
         # Normalize and scale data
-        data = normalize_and_scale_df(data)
+        data = normalize_and_scale_og(data)
         
         # *** FLATTENING MULTIINDEX EARLIER IN THE PROCESS ***
         if isinstance(data.columns, pd.MultiIndex):
-            # Filter by volume_type if specified
-            if volume_type and volume_type != "all":
-                # Get only columns matching the specified volume_type
-                filtered_columns = [(patient, vol) for patient, vol in data.columns if vol == volume_type]
+            # Filter by volume_type if specified using the atlas_volume_types we calculated earlier
+            if atlas_volume_types and atlas_volume_types != available_volume_types:
+                # Get only columns matching the specified volume_types (now handles list properly)
+                filtered_columns = [(patient, vol) for patient, vol in data.columns if vol in atlas_volume_types]
                 if filtered_columns:
                     data = data[filtered_columns]
+                    print(f"[INFO] Filtered to {len(filtered_columns)} columns for volume types {atlas_volume_types}")
                 else:
-                    print(f"[ERROR] No columns found for volume_type {volume_type}")
-            
+                    print(f"[ERROR] No columns found for volume_types {atlas_volume_types}")
+                    print(f"[DEBUG] Available volume types in data: {available_volume_types}")
+                    continue  # Skip this atlas if no matching volume types found
+    
             # Now flatten MultiIndex columns to patient_volumetype format
             flattened_columns = [f"{patient}_{volume}" for patient, volume in data.columns]
             data.columns = flattened_columns
         
         # Save processed data if needed
         if save:
-            volume_suffix = "_all" if volume_type == "all" else f"_{volume_type}"
-            save_path = f"/workspace/project/catatonia_VAE-main_bq/data/proc_extracted_xml_data/Proc_{atlas}{volume_suffix}_{train_or_test}.csv"
+            volume_suffix = "_".join(atlas_volume_types)
+            save_path = f"/workspace/project/catatonia_VAE-main_bq/data/proc_extracted_xml_data/Proc_{atlas}_{volume_suffix}_{train_or_test}.csv"
             data.to_csv(save_path)
         
         # Process each subject for this atlas
@@ -472,20 +582,34 @@ def load_mri_data_2D(
                 continue
             
             # Select patient data from the already flattened data frame
-            patient_columns = [col for col in data.columns if col.startswith(f"{file_name}_")]
+            patient_columns = []
+            for vt in atlas_volume_types:
+                cols = [col for col in data.columns if col.startswith(f"{file_name}_{vt}")]
+                patient_columns.extend(cols)
             
             if not patient_columns:
-                print(f"[ERROR] No columns for patient {file_name} after flattening in atlas {atlas}.")
+                print(f"[ERROR] No columns for patient {file_name} with volume types {atlas_volume_types} in atlas {atlas}.")
                 continue
                 
+            # Extract the actual numerical values from the DataFrame
             patient_data = data[patient_columns]
-            flat_patient_data = flatten_array(patient_data).to_numpy().tolist()
-            
+
+            # Convert DataFrame to numpy array, then flatten
+            if isinstance(patient_data, pd.DataFrame):
+                # Get the values as numpy array and flatten
+                patient_values = patient_data.values.flatten()
+            else:
+                # If it's already a numpy array or similar
+                patient_values = patient_data.flatten()
+
+            # Convert to list for consistent handling
+            flat_patient_data = patient_values.tolist()
+
             # Create/update subject entry in the dictionary
             if file_name not in subjects_dict:
                 subjects_dict[file_name] = {
                     "name": file_name,
-                    "measurements": flat_patient_data,  # Start with this atlas's measurements
+                    "measurements": flat_patient_data,  # Now contains actual numbers, not DataFrame
                     "labels": {var: one_hot_labels[var].iloc[index].to_numpy().tolist() for var in variables}
                 }
             else:
@@ -499,178 +623,7 @@ def load_mri_data_2D(
     # Convert dictionary to list of subjects
     subjects = list(subjects_dict.values())
     print(f"[INFO] Total subjects processed across all atlases: {len(subjects)}")
-    print("[INFO] Data loading complete!")
-    
-    return subjects, data_overview, all_roi_names
-
-def load_mri_data_2D_all_atlases(
-    # The base path to the directory where the MRI data is stored
-    data_path: str,
-    # Names of the atlases that should be used for training
-    atlas_names: List[str],
-    # The path to the CSV metadata files
-    csv_paths: List[str] = None,
-    # The annotations DataFrame that contains the filenames of the MRI data and the diagnoses and covariates
-    annotations: pd.DataFrame = None,
-    # The diagnoses that you want to include in the data loading, defaults to all
-    diagnoses: List[str] = None,
-    # Covariates to include
-    covars: List[str] = [],
-    # Are the files of raw extracted xml data in the .h5 (True) or .csv (False) format?
-    hdf5: bool = True,
-    # Intended usage for the currently loaded data.
-    train_or_test: str = "train",
-    # Should the normalized and scaled file be saved?
-    save: bool = False,
-    # Which volume type to use for analysis (Vgm, Vwm, csf, or all)
-    volume_type: str = None,
-    # List of valid volume types that can be specified
-    valid_volume_types: List[str] = ["Vgm", "Vwm", "Vcsf"],
-) -> Tuple:
-    """
-    Load and process MRI data from multiple atlases.
-    
-    Returns:
-        Tuple: A tuple containing the list of subject data, filtered annotations DataFrame, and list of ROI names
-    """
-    
-    # Validate volume_type parameter
-    if volume_type != "all" and volume_type not in valid_volume_types:
-        raise ValueError(f"[ERROR] Invalid volume_type: {volume_type}. Must be one of: {valid_volume_types} or 'all'")
-    
-    # If the CSV path is provided, check if the file exists, make sure that the annotations are not provided
-    if csv_paths is not None:
-        for csv_path in csv_paths: 
-            assert os.path.isfile(csv_path), f"[ERROR] CSV file '{csv_path}' not found"
-            assert annotations is None, "[ERROR] Both CSV and annotations provided"
-
-    # If the annotations are provided, make sure that they are a pandas DataFrame, and that the CSV path is not provided
-    elif annotations is not None:
-        assert isinstance(
-            annotations, pd.DataFrame
-        )
-        assert csv_paths is None
-        # Initialize the data overview DataFrame
-        data_overview = annotations
-        
-    # If no diagnoses are provided, use all diagnoses in the data overview
-    if diagnoses is None:
-        diagnoses = data_overview["Diagnosis"].unique().tolist()
-        
-    # Filter unwanted diagnoses
-    data_overview = data_overview[data_overview["Diagnosis"].isin(diagnoses)]
-    print(data_overview["Diagnosis"].value_counts())
-    
-    # Handle data columns similar to load_mri_data_2D
-    try:
-        data_overview = data_overview[["Filename", "Dataset", "Diagnosis", "Age", "Sex", "Usage_original", "Sex_int"]]
-    except KeyError as e:
-        print(f"[ERROR] Could not select all columns: {e}. Using available columns.")
-    
-    # If the covariates are not a list, make them a list
-    covars = [covars] if not isinstance(covars, list) else covars
-
-    # If the diagnoses are not a list, make them a list
-    diagnoses = [diagnoses] if not isinstance(diagnoses, list) else diagnoses
-    
-    # Set all the variables that will be one-hot encoded
-    variables = ["Diagnosis"] + covars
-
-    # Prepare one-hot encoded labels
-    one_hot_labels = {}
-    for var in variables:
-        # check that the variables is in the data overview
-        if var not in data_overview.columns:
-            raise ValueError(f"[ERROR] Column '{var}' not found in CSV file or annotations")
-
-        # one hot encode the variable
-        one_hot_labels[var] = pd.get_dummies(data_overview[var], dtype=float)
-
-    # For each subject, collect MRI data and variable data in the Subject object
-    subjects_dict = {}
-    all_roi_names = []
-
-    # Process each atlas in the list
-    for atlas in atlas_names:
-        atlas_data_path = f"{data_path}/Aggregated_{atlas}.h5"
-        
-        if hdf5:
-            data = read_hdf5_to_df(filepath=atlas_data_path)
-        else:
-            data = pd.read_csv(atlas_data_path, header=[0, 1], index_col=0)
-        
-        # Extract unique patient IDs before flattening
-        if isinstance(data.columns, pd.MultiIndex):
-            all_file_names = data.columns.get_level_values(0).unique()
-        else:
-            all_file_names = data.columns
-            
-        # Extract ROI names for this atlas
-        base_roi_names = data.index.tolist()
-        
-        atlas_roi_names = []
-        if volume_type == "all":
-            atlas_roi_names = [f"{atlas}_{roi}_{vt}" for roi in base_roi_names for vt in valid_volume_types]
-        else:
-            atlas_roi_names = [f"{atlas}_{roi}_{volume_type}" for roi in base_roi_names]
-        
-        # Add this atlas's ROI names to the overall list
-        all_roi_names.extend(atlas_roi_names)
-        
-        # Handle MultiIndex columns earlier in the process like in load_mri_data_2D
-        if isinstance(data.columns, pd.MultiIndex):
-            # Filter by volume_type if specified
-            if volume_type and volume_type != "all":
-                # Get only columns matching the specified volume_type
-                filtered_columns = [(patient, vol) for patient, vol in data.columns if vol == volume_type]
-                if filtered_columns:
-                    data = data[filtered_columns]
-                
-            # Now flatten MultiIndex columns to patient_volumetype format
-            flattened_columns = [f"{patient}_{volume}" for patient, volume in data.columns]
-            data.columns = flattened_columns
-            
-        # Normalize and scale data
-        data = normalize_and_scale_df(data)
-        
-        # Save processed data if needed
-        if save:
-            volume_suffix = "_all" if volume_type == "all" else f"_{volume_type}"
-            save_path = f"/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/data/proc_extracted_xml_data/Proc_{atlas}{volume_suffix}_{train_or_test}.csv"
-            data.to_csv(save_path)
-            
-        # Process each subject for this atlas
-        for index, row in data_overview.iterrows():
-            file_name = re.sub(r"\.[^.]+$", "", row["Filename"])
-            
-            if file_name not in all_file_names:
-            
-                continue
-            
-            # Select patient data from the already flattened data frame
-            patient_columns = [col for col in data.columns if col.startswith(f"{file_name}_")]
-            
-            if not patient_columns:
-
-                continue
-                
-            patient_data = data[patient_columns]
-            flat_patient_data = flatten_array(patient_data).to_numpy().tolist()
-            
-            # Create/update subject entry in the dictionary
-            if file_name not in subjects_dict:
-                subjects_dict[file_name] = {
-                    "name": file_name,
-                    "measurements": flat_patient_data,  # Start with this atlas's measurements
-                    "labels": {var: one_hot_labels[var].iloc[index].to_numpy().tolist() for var in variables}
-                }
-            else:
-                # Append this atlas's measurements to existing ones
-                subjects_dict[file_name]["measurements"] += flat_patient_data
-        
-    
-    # Convert dictionary to list of subjects
-    subjects = list(subjects_dict.values())
+    print(f"[INFO] Total ROI features: {len(all_roi_names)}")
     print("[INFO] Data loading complete!")
     
     return subjects, data_overview, all_roi_names

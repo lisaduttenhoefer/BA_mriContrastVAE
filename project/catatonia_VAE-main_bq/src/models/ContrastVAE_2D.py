@@ -117,7 +117,8 @@ class NormativeVAE_2D(nn.Module):
             nn.LeakyReLU(1e-2),
             nn.Dropout(dropout_prob),
             
-            nn.Linear(hidden_dim_1, input_dim)
+            nn.Linear(hidden_dim_1, input_dim),
+            #nn.Sigmoid()
         )
         
         # Optimizer and scheduler
@@ -561,7 +562,7 @@ def bootstrap_train_normative_models_plots(
         bootstrap_train_data = train_data[bootstrap_indices]
         
         # Create a fresh model instance
-        bootstrap_model = NormativeVAE(
+        bootstrap_model = NormativeVAE_2D(
             input_dim=model.input_dim,
             hidden_dim_1=model.hidden_dim_1,
             hidden_dim_2=model.hidden_dim_2,
@@ -569,6 +570,8 @@ def bootstrap_train_normative_models_plots(
             learning_rate=model.learning_rate,
             kldiv_loss_weight=model.kldiv_loss_weight,
             dropout_prob=model.dropout_prob,
+            recon_loss_weight=model.recon_loss_weight,
+            contr_loss_weight=model.contr_loss_weight,
             device=device
         )
         
