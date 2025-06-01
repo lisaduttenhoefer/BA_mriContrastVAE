@@ -410,6 +410,7 @@ def flatten_array(arr):
     if isinstance(arr, pd.Series):
         return arr.values
     return arr.flatten() if hasattr(arr, 'flatten') else arr
+
 def load_mri_data_2D(
     data_path: str,
     atlas_name: List[str] = None,

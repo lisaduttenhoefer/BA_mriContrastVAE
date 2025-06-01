@@ -33,9 +33,11 @@ from utils.logging_utils import (
 from utils.dev_scores_utils import (
     calculate_deviations, 
     plot_deviation_distributions, 
-    visualize_embeddings, 
+    #visualize_embeddings, 
     analyze_regional_deviations,
     extract_roi_names,
+    save_latent_visualizations,
+    visualize_embeddings_multiple
 )
 
 
@@ -269,19 +271,23 @@ def main(args):
     log_and_print_test("Generating visualizations...")
     
     # Plot deviation distributions
-    plot_deviation_distributions(results_df, save_dir)
+    plot_deviation_distributions(results_df, save_dir, norm_diagnosis=norm_diagnosis)
     log_and_print_test("Plotted deviation distributions")
     
     # Visualize embeddings in latent space
     log_and_print_test("Visualizing latent space embeddings...")
-    embedding_fig, embedding_df = visualize_embeddings(
+    
+    results = visualize_embeddings_multiple(
         normative_models=bootstrap_models,
         data_tensor=clinical_data,
         annotations_df=annotations_dev,
-        device=device
+        device=device,
+        columns_to_plot=["Co_Diagnosis", "Dataset", "Diagnosis", "Sex"]
     )
-    embedding_fig.savefig(f"{save_dir}/figures/latent_embeddings.png", dpi=300)
-    embedding_df.to_csv(f"{save_dir}/latent_embeddings.csv", index=False)
+
+    # Save all results
+    save_latent_visualizations(results, output_dir=f"{save_dir}/figures/latent_embeddings")
+    
     log_and_print_test("Saved latent space visualizations")
     
     # Run statistical tests between groups

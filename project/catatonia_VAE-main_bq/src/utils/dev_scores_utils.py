@@ -102,9 +102,6 @@ def calculate_deviations(normative_models, data_tensor, norm_diagnosis, annotati
     results_df["kl_divergence"] = mean_kl_div
     results_df["kl_divergence_std"] = std_kl_div
     
-    # # Add region-wise z-scores
-    # for i in range(mean_region_z_scores.shape[1]):
-    #     results_df[f"region_{i}_z_score"] = mean_region_z_scores[:, i]
     # Create a DataFrame with the new columns
     new_columns = pd.DataFrame(
         mean_region_z_scores, 
@@ -116,8 +113,7 @@ def calculate_deviations(normative_models, data_tensor, norm_diagnosis, annotati
 
     #-------------------------------------------- CALCULATE COMBINED DEVIATION SCORE ---------------------------------------------------------------
     # Normalize both metrics to 0-1 range for easier interpretation
-    #########
-
+    
     #=== IMPROVED DEVIATION SCORE CALCULATION ===
     
     # Method 1: Z-score normalization (preserves relative differences better)
@@ -134,7 +130,7 @@ def calculate_deviations(normative_models, data_tensor, norm_diagnosis, annotati
     recon_percentiles = stats.rankdata(mean_recon_error) / len(mean_recon_error)
     kl_percentiles = stats.rankdata(mean_kl_div) / len(mean_kl_div)
     results_df["deviation_score_percentile"] = (recon_percentiles + kl_percentiles) / 2
-    ######
+    
     # Method 3: Original min-max (FIXED)
     min_recon = results_df["reconstruction_error"].min()
     max_recon = results_df["reconstruction_error"].max()
@@ -146,8 +142,16 @@ def calculate_deviations(normative_models, data_tensor, norm_diagnosis, annotati
     
     # Combined deviation score (equal weighting of both metrics)
     results_df["deviation_score"] = (norm_recon + norm_kl) / 2
-    
-    #=== P-VALUE CALCULATION ===
+
+    return results_df
+
+
+def calculate_group_pvalues(results_df, norm_diagnosis):
+    """
+    Calculate p-values for each diagnosis group compared to the control group.
+    Returns a dictionary with p-values for each metric and diagnosis.
+    """
+    from scipy import stats as scipy_stats
     
     # Get control group data
     control_mask = results_df["Diagnosis"] == norm_diagnosis
@@ -159,35 +163,80 @@ def calculate_deviations(normative_models, data_tensor, norm_diagnosis, annotati
         control_mask[control_indices] = True
         print(f"Using bottom 25% ({control_mask.sum()} subjects) as reference group")
     
-    control_recon = results_df.loc[control_mask, "reconstruction_error"]  #nur die norm Patienten -> norm errors
-    control_kl = results_df.loc[control_mask, "kl_divergence"]  #nur die norm Patienten -> norm errors
-    control_combined = results_df.loc[control_mask, "deviation_score_zscore"]  #nur die norm Patienten -> norm errors
+    control_data = results_df[control_mask]
+    print(f"Control group ({norm_diagnosis}) size: {len(control_data)}")
     
-    # Calculate p-values for each subject
-    p_values_recon = []
-    p_values_kl = []
-    p_values_combined = []
-
-    for idx, row in results_df.iterrows():
-        # P-value: probability of observing this value or higher in control distribution
-        p_recon = np.mean(control_recon >= row["reconstruction_error"])
-        p_kl = np.mean(control_kl >= row["kl_divergence"])
-        p_combined = np.mean(control_combined >= row["deviation_score_zscore"])
+    # Metrics to test
+    metrics = ["reconstruction_error", "kl_divergence", "deviation_score"]
+    
+    # Calculate p-values for each diagnosis group vs control
+    group_pvalues = {}
+    
+    diagnoses = results_df["Diagnosis"].unique()
+    diagnoses = [d for d in diagnoses if d != norm_diagnosis]  # Exclude control group
+    
+    for metric in metrics:
+        group_pvalues[metric] = {}
+        control_values = control_data[metric].values
         
-        # WICHTIG: Werte zu den Listen hinzufügen
-        p_values_recon.append(p_recon)
-        p_values_kl.append(p_kl)
-        p_values_combined.append(p_combined)
+        print(f"\n{metric.upper()} - Control group stats:")
+        print(f"  Mean: {control_values.mean():.4f}, Std: {control_values.std():.4f}")
+        print(f"  Min: {control_values.min():.4f}, Max: {control_values.max():.4f}")
+        
+        for diagnosis in diagnoses:
+            group_data = results_df[results_df["Diagnosis"] == diagnosis]
+            if len(group_data) > 0:
+                group_values = group_data[metric].values
+                
+                print(f"  {diagnosis} (n={len(group_values)}):")
+                print(f"    Mean: {group_values.mean():.4f}, Std: {group_values.std():.4f}")
+                print(f"    Min: {group_values.min():.4f}, Max: {group_values.max():.4f}")
+                
+                # Check for identical distributions (which would cause issues)
+                if np.array_equal(group_values, control_values):
+                    print(f"    WARNING: Identical distributions detected!")
+                    group_pvalues[metric][diagnosis] = 1.0
+                    continue
+                
+                # Check if there's any overlap in values
+                overlap = len(np.intersect1d(group_values, control_values))
+                print(f"    Overlapping values: {overlap}")
+                
+                # Use Mann-Whitney U test (non-parametric) - more robust
+                try:
+                    statistic, p_value = scipy_stats.mannwhitneyu(
+                        group_values, control_values, 
+                        alternative='two-sided'
+                    )
+                    print(f"    Mann-Whitney U: statistic={statistic:.2f}, p={p_value:.6f}")
+                    
+                    # Double-check with t-test for comparison
+                    t_stat, t_pval = scipy_stats.ttest_ind(
+                        group_values, control_values, 
+                        equal_var=False
+                    )
+                    print(f"    T-test (comparison): t={t_stat:.2f}, p={t_pval:.6f}")
+                    
+                    group_pvalues[metric][diagnosis] = p_value
+                    
+                except Exception as e:
+                    print(f"    ERROR in statistical test: {e}")
+                    # Try t-test as fallback
+                    try:
+                        statistic, p_value = scipy_stats.ttest_ind(
+                            group_values, control_values, 
+                            equal_var=False
+                        )
+                        print(f"    Fallback t-test: t={statistic:.2f}, p={p_value:.6f}")
+                        group_pvalues[metric][diagnosis] = p_value
+                    except Exception as e2:
+                        print(f"    ERROR in fallback test: {e2}")
+                        group_pvalues[metric][diagnosis] = np.nan
+    
+    return group_pvalues
 
-    # Nach der Schleife zum DataFrame hinzufügen
-    results_df["p_value_recon"] = p_values_recon
-    results_df["p_value_kl"] = p_values_kl
-    results_df["p_value_combined"] = p_values_combined
-
-    return results_df
-
-def plot_deviation_distributions(results_df, save_dir):
-    """Plot distributions of deviation metrics by diagnosis group."""
+def plot_deviation_distributions(results_df, save_dir, norm_diagnosis="HC"):
+    """Plot distributions of deviation metrics by diagnosis group with group p-values."""
     print(results_df["Diagnosis"].unique())  # Ensure expected categories exist
 
     os.makedirs(f"{save_dir}/figures/distributions", exist_ok=True)
@@ -197,171 +246,8 @@ def plot_deviation_distributions(results_df, save_dir):
     diagnosis_order = ["HC", "SCHZ", "MDD", "CTT", "CTT-MDD", "CTT-SCHZ"]
     diagnosis_palette = dict(zip(diagnosis_order, palette))
 
-    #########
-    # Helper function to calculate group statistics including p-values
-    def calculate_group_stats(results_df, metric, p_value_col):
-        stats_dict = {}
-        for diagnosis in diagnosis_order:
-            group_data = results_df[results_df["Diagnosis"] == diagnosis]
-            if len(group_data) > 0:
-                stats_dict[diagnosis] = {
-                    'mean': group_data[metric].mean(),
-                    'std': group_data[metric].std(),
-                    'n': len(group_data),
-                    'mean_p_value': group_data[p_value_col].mean(),
-                    'significant_count': (group_data[p_value_col] < 0.05).sum(),
-                    'median_p_value': group_data[p_value_col].median()
-                }
-        return stats_dict
-    
-    # Plot reconstruction error distributions with p-value info
-    plt.figure(figsize=(14, 10))
-    
-    # Main KDE plot
-    plt.subplot(2, 1, 1)
-    sns.kdeplot(data=results_df, x="reconstruction_error", hue="Diagnosis", 
-                palette=diagnosis_palette, common_norm=False)
-    plt.title("Reconstruction Error Distribution by Diagnosis", fontsize=16)
-    plt.xlabel("Mean Reconstruction Error", fontsize=14)
-    plt.ylabel("Density", fontsize=14)
-    plt.legend(title="Diagnosis", fontsize=12)
-    
-    # Add p-value histogram subplot
-    plt.subplot(2, 1, 2)
-    for diagnosis in diagnosis_order:
-        group_data = results_df[results_df["Diagnosis"] == diagnosis]
-        if len(group_data) > 0:
-            plt.hist(group_data["p_value_recon"], bins=20, alpha=0.6, 
-                    label=f'{diagnosis} (n={len(group_data)})', 
-                    color=diagnosis_palette.get(diagnosis, 'gray'))
-    
-    plt.axvline(x=0.05, color='red', linestyle='--', alpha=0.7, label='p=0.05')
-    plt.title("P-value Distribution for Reconstruction Error", fontsize=14)
-    plt.xlabel("P-value", fontsize=12)
-    plt.ylabel("Count", fontsize=12)
-    plt.legend(fontsize=10)
-    
-
-    # Enhanced violin plots with p-value annotations
-    plt.figure(figsize=(16, 12))
-    
-    metrics_info = [
-        ("reconstruction_error", "p_value_recon", "Reconstruction Error"),
-        ("kl_divergence", "p_value_kl", "KL Divergence"), 
-        ("deviation_score", "p_value_combined", "Combined Deviation Score")
-    ]
-    
-    for i, (metric, p_col, title) in enumerate(metrics_info, 1):
-        plt.subplot(3, 1, i)
-        
-        # Create violin plot
-        ax = sns.violinplot(data=results_df, x="Diagnosis", y=metric, 
-                           palette=diagnosis_palette, order=diagnosis_order)
-        
-        # Calculate and add statistics annotations
-        stats = calculate_group_stats(results_df, metric, p_col)
-        
-        # Add text annotations with statistics
-        for j, diagnosis in enumerate(diagnosis_order):
-            if diagnosis in stats:
-                s = stats[diagnosis]
-                annotation = (f"n={s['n']}\n"
-                            f"μ={s['mean']:.3f}±{s['std']:.3f}\n"
-                            f"p̄={s['mean_p_value']:.3f}\n"
-                            f"sig: {s['significant_count']}/{s['n']}")
-                
-                # Position annotation above violin
-                y_pos = results_df[results_df["Diagnosis"] == diagnosis][metric].max()
-                ax.text(j, y_pos * 1.05, annotation, ha='center', va='bottom', 
-                       fontsize=9, bbox=dict(boxstyle="round,pad=0.3", 
-                       facecolor='white', alpha=0.8))
-        
-        plt.title(f"{title} by Diagnosis", fontsize=14)
-        if i < 3:
-            plt.xlabel("")
-        else:
-            plt.xlabel("Diagnosis", fontsize=12)
-            
-    plt.tight_layout()
-    plt.savefig(f"{save_dir}/figures/distributions/enhanced_violin_plots.png", dpi=300)
-    plt.close()
-    
-    # Create summary table with p-value statistics
-    selected_diagnoses = ["HC", "SCHZ", "MDD", "CTT", "CTT-MDD", "CTT-SCHZ"]
-    metrics = ["reconstruction_error", "kl_divergence", "deviation_score"]
-    p_cols = ["p_value_recon", "p_value_kl", "p_value_combined"]
-    
-    summary_dict = {}
-    
-    for metric, p_col in zip(metrics, p_cols):
-        summary_data = []
-        
-        for diagnosis in selected_diagnoses:
-            group_data = results_df[results_df["Diagnosis"] == diagnosis]
-            if len(group_data) > 0:
-                summary_data.append({
-                    'Diagnosis': diagnosis,
-                    'n': len(group_data),
-                    'mean': group_data[metric].mean(),
-                    'std': group_data[metric].std(),
-                    'mean_p_value': group_data[p_col].mean(),
-                    'median_p_value': group_data[p_col].median(),
-                    'significant_count': (group_data[p_col] < 0.05).sum(),
-                    'percent_significant': (group_data[p_col] < 0.05).mean() * 100
-                })
-        
-        summary_df = pd.DataFrame(summary_data)
-        
-        # Calculate 95% confidence interval
-        summary_df["ci95"] = 1.96 * summary_df["std"] / np.sqrt(summary_df["count"] if "count" in summary_df.columns else summary_df["n"])
-        
-        # Sort for plotting
-        diagnosis_order_rev = selected_diagnoses[::-1]
-        summary_df["Diagnosis"] = pd.Categorical(summary_df["Diagnosis"], 
-                                               categories=diagnosis_order_rev, ordered=True)
-        summary_df = summary_df.sort_values("Diagnosis")
-        
-        summary_dict[metric] = summary_df
-        
-        # Enhanced errorbar plot with p-value info
-        plt.figure(figsize=(10, 6))
-        
-        # Main errorbar plot
-        plt.subplot(1, 2, 1)
-        plt.errorbar(summary_df["mean"], summary_df["Diagnosis"], 
-                    xerr=summary_df.get("ci95", summary_df["std"]),
-                    fmt='s', color='black', capsize=5, markersize=8)
-        
-        # Add mean p-value as color coding
-        scatter = plt.scatter(summary_df["mean"], summary_df["Diagnosis"], 
-                            c=summary_df["mean_p_value"], cmap='RdYlBu_r', 
-                            s=100, alpha=0.7, edgecolors='black')
-        
-        #plt.colorbar(scatter, label='Mean P-value')
-        plt.title(f"{metric.replace('_', ' ').title()}", fontsize=14)
-        plt.xlabel("Deviation Metric", fontsize=12)
-        
-        # P-value significance bar chart
-        plt.subplot(1, 2, 2)
-        colors = ['red' if p < 0.05 else 'gray' for p in summary_df["percent_significant"]]
-        bars = plt.barh(summary_df["Diagnosis"], summary_df["percent_significant"], 
-                       color=colors, alpha=0.7)
-        
-        # Add percentage labels on bars
-        for i, (bar, pct) in enumerate(zip(bars, summary_df["percent_significant"])):
-            plt.text(bar.get_width() + 1, bar.get_y() + bar.get_height()/2, 
-                    f'{pct:.1f}%', va='center', fontsize=10)
-        
-        plt.axvline(x=5, color='red', linestyle='--', alpha=0.5, label='5% threshold')
-        plt.title("% Subjects with p < 0.05", fontsize=14)
-        plt.xlabel("Percentage", fontsize=12)
-        plt.legend()
-        
-        sns.despine()
-        plt.tight_layout()
-        plt.savefig(f"{save_dir}/figures/distributions/{metric}_enhanced_errorbar.png", dpi=300)
-        plt.close()
-    ############
+    # Calculate group p-values
+    group_pvalues = calculate_group_pvalues(results_df, norm_diagnosis)
 
     # Plot reconstruction error distributions
     plt.figure(figsize=(12, 8))
@@ -422,18 +308,15 @@ def plot_deviation_distributions(results_df, save_dir):
 
     selected_diagnoses = ["HC", "SCHZ", "MDD", "CTT", "CTT-MDD", "CTT-SCHZ"]
 
-    # Berechne Mittelwert, Standardabweichung und n für alle drei Metriken
-    metrics = ["reconstruction_error", "kl_divergence", "deviation_score"]
-    summary_dict = {}
-
+    # Calculate summary statistics for errorbar plots
     metrics = ["reconstruction_error", "kl_divergence", "deviation_score"]
     summary_dict = {}
 
     for metric in metrics:
-        # Filtere die Daten für ausgewählte Diagnosen
+        # Filter data for selected diagnoses
         filtered_data = results_df[results_df["Diagnosis"].isin(selected_diagnoses)]
         
-        # Berechne Summary Statistics (falls noch benötigt)
+        # Calculate summary statistics
         summary_df = (
             filtered_data
             .groupby("Diagnosis")[metric]
@@ -441,154 +324,842 @@ def plot_deviation_distributions(results_df, save_dir):
             .reset_index()
         )
         
-        # Berechne 95%-Konfidenzintervall
+        # Calculate 95% confidence interval
         summary_df["ci95"] = 1.96 * summary_df["std"] / np.sqrt(summary_df["count"])
         
-        # Sortiere in gewünschter Reihenfolge (für Darstellung von unten nach oben)
-        diagnosis_order = selected_diagnoses[::-1]
-        summary_df["Diagnosis"] = pd.Categorical(summary_df["Diagnosis"], categories=diagnosis_order, ordered=True)
+        # Add group p-values
+        summary_df["p_value"] = summary_df["Diagnosis"].map(
+            lambda d: group_pvalues[metric].get(d, np.nan) if d != norm_diagnosis else np.nan
+        )
+        
+        # Sort in desired order (for display from bottom to top)
+        diagnosis_order_plot = selected_diagnoses[::-1]
+        summary_df["Diagnosis"] = pd.Categorical(summary_df["Diagnosis"], categories=diagnosis_order_plot, ordered=True)
         summary_df = summary_df.sort_values("Diagnosis")
         
-        # Speichere die Zusammenfassung für späteren Zugriff
+        # Store summary for later access
         summary_dict[metric] = summary_df
         
-        # Erstelle den Jitterplot anstatt Errorbar-Plot
+        # Create ORIGINAL ERRORBAR PLOT (from first code) - without jitter
         plt.figure(figsize=(8, 6))
         
-        # Filtere nur Diagnosen die tatsächlich Daten haben
+        # Filter only diagnoses that actually have data
         available_diagnoses = filtered_data["Diagnosis"].unique()
-        plot_order = [d for d in diagnosis_order if d in available_diagnoses]
+        plot_order = [d for d in diagnosis_order_plot if d in available_diagnoses]
         
-        # Get MDD color from the palette
-        mdd_color = diagnosis_palette.get('MDD', '#4c72b0')  # fallback to blue if MDD not found
+        # Original errorbar plot
+        plt.errorbar(summary_df["mean"], summary_df["Diagnosis"], 
+                    xerr=summary_df["ci95"],
+                    fmt='s', color='black', capsize=5, markersize=8)
         
-        # Jitterplot mit einheitlicher Farbe (MDD-Farbe) und kleineren Punkten
-        sns.stripplot(data=filtered_data, y="Diagnosis", x=metric, 
-                    order=plot_order, color=mdd_color, 
-                    size=3, alpha=0.6, jitter=0.3)
+        # Add mean p-value as color coding (like in original)
+        summary_df_plot = summary_df[summary_df["Diagnosis"].isin(plot_order)]
+        # Use group p-values instead of mean p-values for coloring
+        p_values_for_color = summary_df_plot["p_value"].fillna(0.5)  # Fill NaN with neutral value
+        scatter = plt.scatter(summary_df_plot["mean"], summary_df_plot["Diagnosis"], 
+                            c=p_values_for_color, cmap='RdYlBu_r', 
+                            s=100, alpha=0.7, edgecolors='black')
         
-        # Füge Errorbars (95% CI) in schwarz hinzu
-        for i, diagnosis in enumerate(plot_order):
-            diagnosis_data = summary_df[summary_df["Diagnosis"] == diagnosis]
-            if len(diagnosis_data) > 0:  # Prüfe ob Daten vorhanden sind
-                mean_val = diagnosis_data["mean"].iloc[0]
-                ci_val = diagnosis_data["ci95"].iloc[0]
-                plt.errorbar(mean_val, i, xerr=ci_val, fmt='none', 
-                            color='black', capsize=4, capthick=1.5, 
-                            elinewidth=1.5, alpha=0.8)
-        
-        plt.title(f"{metric.replace('_', ' ').title()} by Diagnosis", fontsize=14)
+        plt.title(f"{metric.replace('_', ' ').title()}", fontsize=14)
         plt.xlabel("Deviation Metric", fontsize=12)
         plt.ylabel("Diagnosis", fontsize=12)
         
         sns.despine()
         plt.tight_layout()
         
-        # Speichere den Plot
-        plt.savefig(f"{save_dir}/figures/distributions/{metric}_jitterplot.png", dpi=300)
+        # Save the original errorbar plot
+        plt.savefig(f"{save_dir}/figures/distributions/{metric}_errorbar.png", dpi=300)
         plt.close()
-    ############
-    # Create comprehensive summary table and save as CSV
-    comprehensive_summary = []
-    for metric, p_col in zip(metrics, p_cols):
-        for diagnosis in selected_diagnoses:
-            group_data = results_df[results_df["Diagnosis"] == diagnosis]
-            if len(group_data) > 0:
-                comprehensive_summary.append({
-                    'Metric': metric,
-                    'Diagnosis': diagnosis,
-                    'N': len(group_data),
-                    'Mean': group_data[metric].mean(),
-                    'Std': group_data[metric].std(),
-                    'Mean_P_Value': group_data[p_col].mean(),
-                    'Median_P_Value': group_data[p_col].median(),
-                    'Significant_Count': (group_data[p_col] < 0.05).sum(),
-                    'Percent_Significant': (group_data[p_col] < 0.05).mean() * 100,
-                    'Min_P_Value': group_data[p_col].min(),
-                    'Max_P_Value': group_data[p_col].max()
-                })
+        
+        # Create jitterplot with p-values and mean values (current version)
+        plt.figure(figsize=(12, 6))  # Made wider to accommodate value labels
+        
+        # Get MDD color from the palette
+        mdd_color = diagnosis_palette.get('MDD', '#4c72b0')  # fallback to blue if MDD not found
+        
+        # Jitterplot with uniform color (MDD color) and smaller points
+        sns.stripplot(data=filtered_data, y="Diagnosis", x=metric, 
+                    order=plot_order, color=mdd_color, 
+                    size=3, alpha=0.6, jitter=0.3)
+        
+        # Add errorbars, p-values, and mean values
+        for i, diagnosis in enumerate(plot_order):
+            diagnosis_data = summary_df[summary_df["Diagnosis"] == diagnosis]
+            if len(diagnosis_data) > 0:  # Check if data is available
+                mean_val = diagnosis_data["mean"].iloc[0]
+                ci_val = diagnosis_data["ci95"].iloc[0]
+                p_val = diagnosis_data["p_value"].iloc[0]
+                n_val = diagnosis_data["count"].iloc[0]
+                
+                # Add errorbar
+                plt.errorbar(mean_val, i, xerr=ci_val, fmt='none', 
+                            color='black', capsize=4, capthick=1.5, 
+                            elinewidth=1.5, alpha=0.8)
+            
+                # Add p-value text to the right of errorbar (only if not control group and p-value exists)
+                if diagnosis != norm_diagnosis and not np.isnan(p_val):
+                    # Format p-value
+                    if p_val < 0.001:
+                        p_text = "p<0.001***"
+                    elif p_val < 0.01:
+                        p_text = f"p<0.01**"
+                    elif p_val < 0.05:
+                        p_text = f"p={p_val:.3f}*"
+                    else:
+                        p_text = f"p={p_val:.3f}"
+                    
+                    # Position text to the right of the errorbar
+                    text_x = mean_val + ci_val + (plt.xlim()[1] - plt.xlim()[0]) * 0.02
+                    plt.text(text_x, i, p_text, va='center', ha='left', 
+                            fontsize=9, fontweight='bold' if p_val < 0.05 else 'normal',
+                            color='red' if p_val < 0.05 else 'black')
+        
+        plt.title(f"{metric.replace('_', ' ').title()} by Diagnosis (vs {norm_diagnosis})", fontsize=14)
+        plt.xlabel("Deviation Metric", fontsize=12)
+        plt.ylabel("Diagnosis", fontsize=12)
+        
+        # Adjust layout to accommodate value labels
+        plt.subplots_adjust(left=0.25)  # Make room for value labels on the left
+        
+        sns.despine()
+        plt.tight_layout()
+        
+        # Save the jitterplot
+        plt.savefig(f"{save_dir}/figures/distributions/{metric}_jitterplot_with_values.png", dpi=300, bbox_inches='tight')
+        plt.close()
     
-    comprehensive_df = pd.DataFrame(comprehensive_summary)
-    comprehensive_df.to_csv(f"{save_dir}/figures/distributions/summary_with_pvalues.csv", index=False)
+    # Create comprehensive summary table with group p-values and save as CSV
+    # comprehensive_summary = []
+    # for metric in metrics:
+    #     for diagnosis in selected_diagnoses:
+    #         group_data = results_df[results_df["Diagnosis"] == diagnosis]
+    #         if len(group_data) > 0:
+    #             p_val = group_pvalues[metric].get(diagnosis, np.nan) if diagnosis != norm_diagnosis else np.nan
+    #             comprehensive_summary.append({
+    #                 'Metric': metric,
+    #                 'Diagnosis': diagnosis,
+    #                 'N': len(group_data),
+    #                 'Mean': group_data[metric].mean(),
+    #                 'Std': group_data[metric].std(),
+    #                 'CI95': 1.96 * group_data[metric].std() / np.sqrt(len(group_data)),
+    #                 'Group_P_Value': p_val,
+    #                 'Significant': 'Yes' if not np.isnan(p_val) and p_val < 0.05 else 'No' if not np.isnan(p_val) else 'N/A'
+    #             })
     
-    print(f"Summary with p-values saved to {save_dir}/figures/distributions/summary_with_pvalues.csv")
-    #######
+    # comprehensive_df = pd.DataFrame(comprehensive_summary)
+    # comprehensive_df.to_csv(f"{save_dir}/figures/distributions/summary_with_group_pvalues.csv", index=False)
+    
+    # print(f"Summary with group p-values saved to {save_dir}/figures/distributions/summary_with_group_pvalues.csv")
+    # print("\nGroup P-values Summary:")
+    # for metric in metrics:
+    #     print(f"\n{metric.upper()}:")
+    #     for diagnosis, p_val in group_pvalues[metric].items():
+    #         significance = "***" if p_val < 0.001 else "**" if p_val < 0.01 else "*" if p_val < 0.05 else ""
+    #         print(f"  {diagnosis}: p = {p_val:.4f} {significance}")
+    
     return summary_dict
 
-def visualize_embeddings(normative_models, data_tensor, annotations_df, device="cuda"):
+    # # Create comprehensive summary table with group p-values and save as CSV
+    # comprehensive_summary = []
+    # for metric in metrics:
+    #     for diagnosis in selected_diagnoses:
+    #         group_data = results_df[results_df["Diagnosis"] == diagnosis]
+    #         if len(group_data) > 0:
+    #             p_val = group_pvalues[metric].get(diagnosis, np.nan) if diagnosis != norm_diagnosis else np.nan
+    #             comprehensive_summary.append({
+    #                 'Metric': metric,
+    #                 'Diagnosis': diagnosis,
+    #                 'N': len(group_data),
+    #                 'Mean': group_data[metric].mean(),
+    #                 'Std': group_data[metric].std(),
+    #                 'CI95': 1.96 * group_data[metric].std() / np.sqrt(len(group_data)),
+    #                 'Group_P_Value': p_val,
+    #                 'Significant': 'Yes' if not np.isnan(p_val) and p_val < 0.05 else 'No' if not np.isnan(p_val) else 'N/A'
+    #             })
+    
+    # comprehensive_df = pd.DataFrame(comprehensive_summary)
+    # comprehensive_df.to_csv(f"{save_dir}/figures/distributions/summary_with_group_pvalues.csv", index=False)
+    
+    # print(f"Summary with group p-values saved to {save_dir}/figures/distributions/summary_with_group_pvalues.csv")
+    # print("\nGroup P-values Summary:")
+    # for metric in metrics:
+    #     print(f"\n{metric.upper()}:")
+    #     for diagnosis, p_val in group_pvalues[metric].items():
+    #         significance = "***" if p_val < 0.001 else "**" if p_val < 0.01 else "*" if p_val < 0.05 else ""
+    #         print(f"  {diagnosis}: p = {p_val:.4f} {significance}")
+    
+    return summary_dict
 
-    """Visualize data in the latent space of the normative model, ensuring alignment."""
+# def calculate_deviations(normative_models, data_tensor, norm_diagnosis, annotations_df, device="cuda"):
+#     """
+#     Calculate deviation scores using bootstrap models, ensuring perfect alignment
+#     between data tensor and annotations.
     
-    # Sicherstellen, dass die Anzahl der Samples übereinstimmt
+#     Args:
+#         normative_models: List of trained normative VAE models
+#         data_tensor: Tensor of input data to evaluate
+#         annotations_df: DataFrame with subject metadata
+#         device: Computing device
+        
+#     Returns:
+#         DataFrame with deviation scores for each subject
+#     """
+
+#     # Verify data alignment
+#     total_models = len(normative_models)
+#     total_subjects = data_tensor.shape[0]
+    
+#     # Check for size mismatch and report
+#     if total_subjects != len(annotations_df):
+#         print(f"WARNING: Size mismatch detected: {total_subjects} samples in data tensor vs {len(annotations_df)} rows in annotations")
+#         print("Creating properly aligned dataset by extracting common subjects...")
+
+#         # Get filenames in annotations_df
+#         filenames = annotations_df["Filename"].tolist()
+        
+#         # Create a new annotations_df with only rows that have matching data
+#         valid_indices = list(range(min(total_subjects, len(annotations_df))))
+#         aligned_annotations = annotations_df.iloc[valid_indices].reset_index(drop=True)
+        
+#         # Use these for processing
+#         annotations_df = aligned_annotations
+#         print(f"Aligned datasets - working with {len(annotations_df)} subjects")
+    
+#     # Prepare arrays to store results
+#     all_recon_errors = np.zeros((total_subjects, total_models))
+#     all_kl_divs = np.zeros((total_subjects, total_models))
+#     all_z_scores = np.zeros((total_subjects, data_tensor.shape[1], total_models))
+    
+#     # Process each model
+#     for i, model in enumerate(normative_models):
+#         model.eval()
+#         model.to(device)
+#         with torch.no_grad():
+#             batch_data = data_tensor.to(device)
+#             recon, mu, log_var = model(batch_data)
+            
+#             #--------------------------------------------CALCULATE RECONSTRUCTION ERROR ------------------------------------------------------------
+#             # Mean squared error between original brain measurements and their reconstruction
+#             # -> how well the normative model can reproduce he brain pattern
+#             # -> Higher values indicate brain patterns deviating from normative expectations
+#             recon_error = torch.mean((batch_data - recon) ** 2, dim=1).cpu().numpy()
+#             all_recon_errors[:, i] = recon_error
+            
+#             #------------------------------------------------CALCULATE KL DIVERGENCE ---------------------------------------------------------------
+#             # -> divergence between the encoded distribution and N(0,1)
+#             kl_div = -0.5 * torch.sum(1 + log_var - mu.pow(2) - log_var.exp(), dim=1).cpu().numpy()
+#             all_kl_divs[:, i] = kl_div
+            
+#             #---------------------------------------------CALCULATE REGION-WISE-Z-SCORES ---------------------------------------------------------------
+#             z_scores = ((batch_data - recon) ** 2).cpu().numpy()
+#             all_z_scores[:, :, i] = z_scores
+        
+#         # Clear GPU memory
+#         torch.cuda.empty_cache()
+    
+#     # Average across bootstrap models
+#     mean_recon_error = np.mean(all_recon_errors, axis=1)
+#     std_recon_error = np.std(all_recon_errors, axis=1)
+#     mean_kl_div = np.mean(all_kl_divs, axis=1)
+#     std_kl_div = np.std(all_kl_divs, axis=1)
+    
+#     # Calculate region-wise mean z-scores
+#     mean_region_z_scores = np.mean(all_z_scores, axis=2)
+    
+#     # Create result DataFrame with the properly aligned annotations
+#     results_df = annotations_df[["Filename", "Diagnosis", "Age", "Sex", "Dataset"]].copy()
+    
+#     # Now these should be the same length
+#     results_df["reconstruction_error"] = mean_recon_error
+#     results_df["reconstruction_error_std"] = std_recon_error
+#     results_df["kl_divergence"] = mean_kl_div
+#     results_df["kl_divergence_std"] = std_kl_div
+    
+#     # # Add region-wise z-scores
+#     # for i in range(mean_region_z_scores.shape[1]):
+#     #     results_df[f"region_{i}_z_score"] = mean_region_z_scores[:, i]
+#     # Create a DataFrame with the new columns
+#     new_columns = pd.DataFrame(
+#         mean_region_z_scores, 
+#         columns=[f"region_{i}_z_score" for i in range(mean_region_z_scores.shape[1])]
+#     )
+
+#     # Efficiently concatenate instead of inserting columns one by one
+#     results_df = pd.concat([results_df, new_columns], axis=1)
+
+#     #-------------------------------------------- CALCULATE COMBINED DEVIATION SCORE ---------------------------------------------------------------
+#     # Normalize both metrics to 0-1 range for easier interpretation
+#     #########
+
+#     #=== IMPROVED DEVIATION SCORE CALCULATION ===
+    
+#     # Method 1: Z-score normalization (preserves relative differences better)
+#     scaler_recon = StandardScaler()
+#     scaler_kl = StandardScaler()
+    
+#     z_norm_recon = scaler_recon.fit_transform(mean_recon_error.reshape(-1, 1)).flatten()
+#     z_norm_kl = scaler_kl.fit_transform(mean_kl_div.reshape(-1, 1)).flatten()
+    
+#     # Combined deviation score (Z-score based)
+#     results_df["deviation_score_zscore"] = (z_norm_recon + z_norm_kl) / 2
+    
+#     # Method 2: Percentile-based scoring
+#     recon_percentiles = stats.rankdata(mean_recon_error) / len(mean_recon_error)
+#     kl_percentiles = stats.rankdata(mean_kl_div) / len(mean_kl_div)
+#     results_df["deviation_score_percentile"] = (recon_percentiles + kl_percentiles) / 2
+#     ######
+#     # Method 3: Original min-max (FIXED)
+#     min_recon = results_df["reconstruction_error"].min()
+#     max_recon = results_df["reconstruction_error"].max()
+#     norm_recon = (results_df["reconstruction_error"] - min_recon) / (max_recon - min_recon)
+    
+#     min_kl = results_df["kl_divergence"].min()
+#     max_kl = results_df["kl_divergence"].max()
+#     norm_kl = (results_df["kl_divergence"] - min_kl) / (max_kl - min_kl)
+    
+#     # Combined deviation score (equal weighting of both metrics)
+#     results_df["deviation_score"] = (norm_recon + norm_kl) / 2
+    
+#     #=== P-VALUE CALCULATION ===
+    
+#     # Get control group data
+#     control_mask = results_df["Diagnosis"] == norm_diagnosis
+#     if not control_mask.any():
+#         print(f"WARNING: No control group '{norm_diagnosis}' found in data. Available diagnoses: {results_df['Diagnosis'].unique()}")
+#         # Use bottom 25% as reference if no explicit control group
+#         control_indices = np.argsort(results_df["deviation_score_zscore"])[:len(results_df)//4]
+#         control_mask = np.zeros(len(results_df), dtype=bool)
+#         control_mask[control_indices] = True
+#         print(f"Using bottom 25% ({control_mask.sum()} subjects) as reference group")
+    
+#     control_recon = results_df.loc[control_mask, "reconstruction_error"]  #nur die norm Patienten -> norm errors
+#     control_kl = results_df.loc[control_mask, "kl_divergence"]  #nur die norm Patienten -> norm errors
+#     control_combined = results_df.loc[control_mask, "deviation_score_zscore"]  #nur die norm Patienten -> norm errors
+    
+#     # Calculate p-values for each subject
+#     p_values_recon = []
+#     p_values_kl = []
+#     p_values_combined = []
+
+#     for idx, row in results_df.iterrows():
+#         # P-value: probability of observing this value or higher in control distribution
+#         p_recon = np.mean(control_recon >= row["reconstruction_error"])
+#         p_kl = np.mean(control_kl >= row["kl_divergence"])
+#         p_combined = np.mean(control_combined >= row["deviation_score_zscore"])
+        
+#         # WICHTIG: Werte zu den Listen hinzufügen
+#         p_values_recon.append(p_recon)
+#         p_values_kl.append(p_kl)
+#         p_values_combined.append(p_combined)
+
+#     # Nach der Schleife zum DataFrame hinzufügen
+#     results_df["p_value_recon"] = p_values_recon
+#     results_df["p_value_kl"] = p_values_kl
+#     results_df["p_value_combined"] = p_values_combined
+
+#     return results_df
+
+# def plot_deviation_distributions(results_df, save_dir):
+#     """Plot distributions of deviation metrics by diagnosis group."""
+#     print(results_df["Diagnosis"].unique())  # Ensure expected categories exist
+
+#     os.makedirs(f"{save_dir}/figures/distributions", exist_ok=True)
+    
+#     # Create color palette
+#     palette = sns.light_palette("blue", n_colors=6, reverse=True)
+#     diagnosis_order = ["HC", "SCHZ", "MDD", "CTT", "CTT-MDD", "CTT-SCHZ"]
+#     diagnosis_palette = dict(zip(diagnosis_order, palette))
+
+#     #########
+#     # Helper function to calculate group statistics including p-values
+#     def calculate_group_stats(results_df, metric, p_value_col):
+#         stats_dict = {}
+#         for diagnosis in diagnosis_order:
+#             group_data = results_df[results_df["Diagnosis"] == diagnosis]
+#             if len(group_data) > 0:
+#                 stats_dict[diagnosis] = {
+#                     'mean': group_data[metric].mean(),
+#                     'std': group_data[metric].std(),
+#                     'n': len(group_data),
+#                     'mean_p_value': group_data[p_value_col].mean(),
+#                     'significant_count': (group_data[p_value_col] < 0.05).sum(),
+#                     'median_p_value': group_data[p_value_col].median()
+#                 }
+#         return stats_dict
+    
+#     # Plot reconstruction error distributions with p-value info
+#     plt.figure(figsize=(14, 10))
+    
+#     # Main KDE plot
+#     plt.subplot(2, 1, 1)
+#     sns.kdeplot(data=results_df, x="reconstruction_error", hue="Diagnosis", 
+#                 palette=diagnosis_palette, common_norm=False)
+#     plt.title("Reconstruction Error Distribution by Diagnosis", fontsize=16)
+#     plt.xlabel("Mean Reconstruction Error", fontsize=14)
+#     plt.ylabel("Density", fontsize=14)
+#     plt.legend(title="Diagnosis", fontsize=12)
+    
+#     # Add p-value histogram subplot
+#     plt.subplot(2, 1, 2)
+#     for diagnosis in diagnosis_order:
+#         group_data = results_df[results_df["Diagnosis"] == diagnosis]
+#         if len(group_data) > 0:
+#             plt.hist(group_data["p_value_recon"], bins=20, alpha=0.6, 
+#                     label=f'{diagnosis} (n={len(group_data)})', 
+#                     color=diagnosis_palette.get(diagnosis, 'gray'))
+    
+#     plt.axvline(x=0.05, color='red', linestyle='--', alpha=0.7, label='p=0.05')
+#     plt.title("P-value Distribution for Reconstruction Error", fontsize=14)
+#     plt.xlabel("P-value", fontsize=12)
+#     plt.ylabel("Count", fontsize=12)
+#     plt.legend(fontsize=10)
+    
+
+#     # Enhanced violin plots with p-value annotations
+#     plt.figure(figsize=(16, 12))
+    
+#     metrics_info = [
+#         ("reconstruction_error", "p_value_recon", "Reconstruction Error"),
+#         ("kl_divergence", "p_value_kl", "KL Divergence"), 
+#         ("deviation_score", "p_value_combined", "Combined Deviation Score")
+#     ]
+    
+#     for i, (metric, p_col, title) in enumerate(metrics_info, 1):
+#         plt.subplot(3, 1, i)
+        
+#         # Create violin plot
+#         ax = sns.violinplot(data=results_df, x="Diagnosis", y=metric, 
+#                            palette=diagnosis_palette, order=diagnosis_order)
+        
+#         # Calculate and add statistics annotations
+#         stats = calculate_group_stats(results_df, metric, p_col)
+        
+#         # Add text annotations with statistics
+#         for j, diagnosis in enumerate(diagnosis_order):
+#             if diagnosis in stats:
+#                 s = stats[diagnosis]
+#                 annotation = (f"n={s['n']}\n"
+#                             f"μ={s['mean']:.3f}±{s['std']:.3f}\n"
+#                             f"p̄={s['mean_p_value']:.3f}\n"
+#                             f"sig: {s['significant_count']}/{s['n']}")
+                
+#                 # Position annotation above violin
+#                 y_pos = results_df[results_df["Diagnosis"] == diagnosis][metric].max()
+#                 ax.text(j, y_pos * 1.05, annotation, ha='center', va='bottom', 
+#                        fontsize=9, bbox=dict(boxstyle="round,pad=0.3", 
+#                        facecolor='white', alpha=0.8))
+        
+#         plt.title(f"{title} by Diagnosis", fontsize=14)
+#         if i < 3:
+#             plt.xlabel("")
+#         else:
+#             plt.xlabel("Diagnosis", fontsize=12)
+            
+#     plt.tight_layout()
+#     plt.savefig(f"{save_dir}/figures/distributions/enhanced_violin_plots.png", dpi=300)
+#     plt.close()
+    
+#     # Create summary table with p-value statistics
+#     selected_diagnoses = ["HC", "SCHZ", "MDD", "CTT", "CTT-MDD", "CTT-SCHZ"]
+#     metrics = ["reconstruction_error", "kl_divergence", "deviation_score"]
+#     p_cols = ["p_value_recon", "p_value_kl", "p_value_combined"]
+    
+#     summary_dict = {}
+    
+#     for metric, p_col in zip(metrics, p_cols):
+#         summary_data = []
+        
+#         for diagnosis in selected_diagnoses:
+#             group_data = results_df[results_df["Diagnosis"] == diagnosis]
+#             if len(group_data) > 0:
+#                 summary_data.append({
+#                     'Diagnosis': diagnosis,
+#                     'n': len(group_data),
+#                     'mean': group_data[metric].mean(),
+#                     'std': group_data[metric].std(),
+#                     'mean_p_value': group_data[p_col].mean(),
+#                     'median_p_value': group_data[p_col].median(),
+#                     'significant_count': (group_data[p_col] < 0.05).sum(),
+#                     'percent_significant': (group_data[p_col] < 0.05).mean() * 100
+#                 })
+        
+#         summary_df = pd.DataFrame(summary_data)
+        
+#         # Calculate 95% confidence interval
+#         summary_df["ci95"] = 1.96 * summary_df["std"] / np.sqrt(summary_df["count"] if "count" in summary_df.columns else summary_df["n"])
+        
+#         # Sort for plotting
+#         diagnosis_order_rev = selected_diagnoses[::-1]
+#         summary_df["Diagnosis"] = pd.Categorical(summary_df["Diagnosis"], 
+#                                                categories=diagnosis_order_rev, ordered=True)
+#         summary_df = summary_df.sort_values("Diagnosis")
+        
+#         summary_dict[metric] = summary_df
+        
+#         # Enhanced errorbar plot with p-value info
+#         plt.figure(figsize=(10, 6))
+        
+#         # Main errorbar plot
+#         plt.subplot(1, 2, 1)
+#         plt.errorbar(summary_df["mean"], summary_df["Diagnosis"], 
+#                     xerr=summary_df.get("ci95", summary_df["std"]),
+#                     fmt='s', color='black', capsize=5, markersize=8)
+        
+#         # Add mean p-value as color coding
+#         scatter = plt.scatter(summary_df["mean"], summary_df["Diagnosis"], 
+#                             c=summary_df["mean_p_value"], cmap='RdYlBu_r', 
+#                             s=100, alpha=0.7, edgecolors='black')
+        
+#         #plt.colorbar(scatter, label='Mean P-value')
+#         plt.title(f"{metric.replace('_', ' ').title()}", fontsize=14)
+#         plt.xlabel("Deviation Metric", fontsize=12)
+        
+#         # P-value significance bar chart
+#         plt.subplot(1, 2, 2)
+#         colors = ['red' if p < 0.05 else 'gray' for p in summary_df["percent_significant"]]
+#         bars = plt.barh(summary_df["Diagnosis"], summary_df["percent_significant"], 
+#                        color=colors, alpha=0.7)
+        
+#         # Add percentage labels on bars
+#         for i, (bar, pct) in enumerate(zip(bars, summary_df["percent_significant"])):
+#             plt.text(bar.get_width() + 1, bar.get_y() + bar.get_height()/2, 
+#                     f'{pct:.1f}%', va='center', fontsize=10)
+        
+#         plt.axvline(x=5, color='red', linestyle='--', alpha=0.5, label='5% threshold')
+#         plt.title("% Subjects with p < 0.05", fontsize=14)
+#         plt.xlabel("Percentage", fontsize=12)
+#         plt.legend()
+        
+#         sns.despine()
+#         plt.tight_layout()
+#         plt.savefig(f"{save_dir}/figures/distributions/{metric}_enhanced_errorbar.png", dpi=300)
+#         plt.close()
+#     ############
+
+#     # Plot reconstruction error distributions
+#     plt.figure(figsize=(12, 8))
+#     sns.kdeplot(data=results_df, x="reconstruction_error", hue="Diagnosis", palette=diagnosis_palette, common_norm=False)
+#     plt.title("Reconstruction Error Distribution by Diagnosis", fontsize=16)
+#     plt.xlabel("Mean Reconstruction Error", fontsize=14)
+#     plt.ylabel("Density", fontsize=14)
+#     plt.legend(title="Diagnosis", fontsize=12)
+#     sns.despine()
+#     plt.tight_layout()
+#     plt.savefig(f"{save_dir}/figures/distributions/recon_error_dist.png", dpi=300)
+#     plt.close()
+    
+#     # Plot KL divergence distributions
+#     plt.figure(figsize=(12, 8))
+#     sns.kdeplot(data=results_df, x="kl_divergence", hue="Diagnosis", palette=diagnosis_palette, common_norm=False)
+#     plt.title("KL Divergence Distribution by Diagnosis", fontsize=16)
+#     plt.xlabel("Mean KL Divergence", fontsize=14)
+#     plt.ylabel("Density", fontsize=14)
+#     plt.legend(title="Diagnosis", fontsize=12)
+#     sns.despine()
+#     plt.tight_layout()
+#     plt.savefig(f"{save_dir}/figures/distributions/kl_div_dist.png", dpi=300)
+#     plt.close()
+    
+#     # Plot combined deviation score distributions
+#     plt.figure(figsize=(12, 8))
+#     sns.kdeplot(data=results_df, x="deviation_score", hue="Diagnosis", palette=diagnosis_palette, common_norm=False)
+#     plt.title("Combined Deviation Score Distribution by Diagnosis", fontsize=16)
+#     plt.xlabel("Deviation Score", fontsize=14)
+#     plt.ylabel("Density", fontsize=14)
+#     plt.legend(title="Diagnosis", fontsize=12)
+#     sns.despine()
+#     plt.tight_layout()
+#     plt.savefig(f"{save_dir}/figures/distributions/deviation_score_dist.png", dpi=300)
+#     plt.close()
+    
+#     # Plot violin plots for all metrics
+#     plt.figure(figsize=(15, 10))
+    
+#     plt.subplot(3, 1, 1)
+#     sns.violinplot(data=results_df, x="Diagnosis", y="reconstruction_error", palette=diagnosis_palette)
+#     plt.title("Reconstruction Error by Diagnosis", fontsize=14)
+#     plt.xlabel("")
+    
+#     plt.subplot(3, 1, 2)
+#     sns.violinplot(data=results_df, x="Diagnosis", y="kl_divergence", hue="Diagnosis", palette=diagnosis_palette, legend = False)
+#     plt.title("KL Divergence by Diagnosis", fontsize=14)
+#     plt.xlabel("")
+    
+#     plt.subplot(3, 1, 3)
+#     sns.violinplot(data=results_df, x="Diagnosis", y="deviation_score", palette=diagnosis_palette)
+#     plt.title("Combined Deviation Score by Diagnosis", fontsize=14)
+    
+#     plt.tight_layout()
+#     plt.savefig(f"{save_dir}/figures/distributions/metrics_violin_plots.png", dpi=300)
+#     plt.close()
+
+#     selected_diagnoses = ["HC", "SCHZ", "MDD", "CTT", "CTT-MDD", "CTT-SCHZ"]
+
+#     # Berechne Mittelwert, Standardabweichung und n für alle drei Metriken
+#     metrics = ["reconstruction_error", "kl_divergence", "deviation_score"]
+#     summary_dict = {}
+
+#     metrics = ["reconstruction_error", "kl_divergence", "deviation_score"]
+#     summary_dict = {}
+
+#     for metric in metrics:
+#         # Filtere die Daten für ausgewählte Diagnosen
+#         filtered_data = results_df[results_df["Diagnosis"].isin(selected_diagnoses)]
+        
+#         # Berechne Summary Statistics (falls noch benötigt)
+#         summary_df = (
+#             filtered_data
+#             .groupby("Diagnosis")[metric]
+#             .agg(['mean', 'std', 'count'])
+#             .reset_index()
+#         )
+        
+#         # Berechne 95%-Konfidenzintervall
+#         summary_df["ci95"] = 1.96 * summary_df["std"] / np.sqrt(summary_df["count"])
+        
+#         # Sortiere in gewünschter Reihenfolge (für Darstellung von unten nach oben)
+#         diagnosis_order = selected_diagnoses[::-1]
+#         summary_df["Diagnosis"] = pd.Categorical(summary_df["Diagnosis"], categories=diagnosis_order, ordered=True)
+#         summary_df = summary_df.sort_values("Diagnosis")
+        
+#         # Speichere die Zusammenfassung für späteren Zugriff
+#         summary_dict[metric] = summary_df
+        
+#         # Erstelle den Jitterplot anstatt Errorbar-Plot
+#         plt.figure(figsize=(8, 6))
+        
+#         # Filtere nur Diagnosen die tatsächlich Daten haben
+#         available_diagnoses = filtered_data["Diagnosis"].unique()
+#         plot_order = [d for d in diagnosis_order if d in available_diagnoses]
+        
+#         # Get MDD color from the palette
+#         mdd_color = diagnosis_palette.get('MDD', '#4c72b0')  # fallback to blue if MDD not found
+        
+#         # Jitterplot mit einheitlicher Farbe (MDD-Farbe) und kleineren Punkten
+#         sns.stripplot(data=filtered_data, y="Diagnosis", x=metric, 
+#                     order=plot_order, color=mdd_color, 
+#                     size=3, alpha=0.6, jitter=0.3)
+        
+#         # Füge Errorbars (95% CI) in schwarz hinzu
+#         for i, diagnosis in enumerate(plot_order):
+#             diagnosis_data = summary_df[summary_df["Diagnosis"] == diagnosis]
+#             if len(diagnosis_data) > 0:  # Prüfe ob Daten vorhanden sind
+#                 mean_val = diagnosis_data["mean"].iloc[0]
+#                 ci_val = diagnosis_data["ci95"].iloc[0]
+#                 plt.errorbar(mean_val, i, xerr=ci_val, fmt='none', 
+#                             color='black', capsize=4, capthick=1.5, 
+#                             elinewidth=1.5, alpha=0.8)
+        
+#         plt.title(f"{metric.replace('_', ' ').title()} by Diagnosis", fontsize=14)
+#         plt.xlabel("Deviation Metric", fontsize=12)
+#         plt.ylabel("Diagnosis", fontsize=12)
+        
+#         sns.despine()
+#         plt.tight_layout()
+        
+#         # Speichere den Plot
+#         plt.savefig(f"{save_dir}/figures/distributions/{metric}_jitterplot.png", dpi=300)
+#         plt.close()
+#     ############
+#     # Create comprehensive summary table and save as CSV
+#     comprehensive_summary = []
+#     for metric, p_col in zip(metrics, p_cols):
+#         for diagnosis in selected_diagnoses:
+#             group_data = results_df[results_df["Diagnosis"] == diagnosis]
+#             if len(group_data) > 0:
+#                 comprehensive_summary.append({
+#                     'Metric': metric,
+#                     'Diagnosis': diagnosis,
+#                     'N': len(group_data),
+#                     'Mean': group_data[metric].mean(),
+#                     'Std': group_data[metric].std(),
+#                     'Mean_P_Value': group_data[p_col].mean(),
+#                     'Median_P_Value': group_data[p_col].median(),
+#                     'Significant_Count': (group_data[p_col] < 0.05).sum(),
+#                     'Percent_Significant': (group_data[p_col] < 0.05).mean() * 100,
+#                     'Min_P_Value': group_data[p_col].min(),
+#                     'Max_P_Value': group_data[p_col].max()
+#                 })
+    
+#     comprehensive_df = pd.DataFrame(comprehensive_summary)
+#     comprehensive_df.to_csv(f"{save_dir}/figures/distributions/summary_with_pvalues.csv", index=False)
+    
+#     print(f"Summary with p-values saved to {save_dir}/figures/distributions/summary_with_pvalues.csv")
+#     #######
+#     return summary_dict
+
+
+def visualize_embeddings_multiple(normative_models, data_tensor, annotations_df, 
+                                 columns_to_plot=None, device="cuda", figsize=(12, 10)):
+    """
+    Visualize data in the latent space with multiple colorations based on different metadata columns.
+    
+    Args:
+        normative_models: List of trained models
+        data_tensor: Input data tensor
+        annotations_df: DataFrame with metadata
+        columns_to_plot: List of column names to use for coloring. If None, uses all categorical columns
+        device: Device to run model on
+        figsize: Figure size for each plot
+    
+    Returns:
+        Dictionary with column names as keys and (figure, plot_df) tuples as values
+    """
+    
+    # Ensure alignment between data tensor and annotations
     total_subjects = data_tensor.shape[0]
-    
     if total_subjects != len(annotations_df):
         print(f"WARNING: Size mismatch detected: {total_subjects} samples in data tensor vs {len(annotations_df)} rows in annotations")
         print("Creating properly aligned dataset by extracting common subjects...")
-        
-        # Erstelle eine neue `annotations_df`, die nur die passenden Zeilen enthält
         valid_indices = list(range(min(total_subjects, len(annotations_df))))
         aligned_annotations = annotations_df.iloc[valid_indices].reset_index(drop=True)
-        
-        # Aktualisiere `annotations_df`
         annotations_df = aligned_annotations
         print(f"Aligned datasets - working with {len(annotations_df)} subjects")
     
-    # Verwende das erste Modell für die Visualisierung
+    # Use first model for visualization
     model = normative_models[0]
     model.eval()
     model.to(device)
     
+    # Generate embeddings (only need to do this once)
     all_embeddings = []
     batch_size = 32
     
-    # Daten in Batches verarbeiten, um Speicherprobleme zu vermeiden
     data_loader = DataLoader(
-        TensorDataset(data_tensor), 
+        TensorDataset(data_tensor),
         batch_size=batch_size,
         shuffle=False
     )
     
+    print("Generating embeddings...")
     with torch.no_grad():
         for batch_data, in data_loader:
             batch_data = batch_data.to(device)
             _, mu, _ = model(batch_data)
             all_embeddings.append(mu.cpu().numpy())
     
-    # Kombiniere alle Embeddings
+    # Combine all embeddings
     embeddings = np.vstack(all_embeddings)
     
-    # UMAP für Visualisierung
-    reducer = umap.UMAP(n_neighbors=15, min_dist=0.1, metric='euclidean')
+    # UMAP for visualization (only need to do this once)
+    print("Computing UMAP projection...")
+    reducer = umap.UMAP(n_neighbors=15, min_dist=0.1, metric='euclidean', random_state=42)
     umap_embeddings = reducer.fit_transform(embeddings)
     
-    # Erstelle DataFrame für das Plotten
-    plot_df = annotations_df[["Diagnosis"]].copy()
-    plot_df["umap_1"] = umap_embeddings[:, 0]
-    plot_df["umap_2"] = umap_embeddings[:, 1]
+    # Determine which columns to plot
+    if columns_to_plot is None:
+        # Automatically detect categorical columns (excluding purely numerical ones)
+        columns_to_plot = []
+        for col in annotations_df.columns:
+            if annotations_df[col].dtype == 'object' or annotations_df[col].nunique() <= 20:
+                columns_to_plot.append(col)
+        print(f"Auto-detected columns for visualization: {columns_to_plot}")
     
-    # Plot
-    plt.figure(figsize=(12, 10))
-    palette = sns.color_palette("colorblind", n_colors=6)
-    diagnosis_order = ["HC", "SCHZ", "MDD", "CTT", "CTT-MDD", "CTT-SCHZ"]
-    diagnosis_colors = dict(zip(diagnosis_order, palette))
+    # Create visualizations for each column
+    results = {}
+    
+    for col in columns_to_plot:
+        if col not in annotations_df.columns:
+            print(f"Warning: Column '{col}' not found in annotations_df. Skipping.")
+            continue
+            
+        print(f"Creating visualization for column: {col}")
+        
+        # Create plot DataFrame
+        plot_df = annotations_df[[col]].copy()
+        plot_df["umap_1"] = umap_embeddings[:, 0]
+        plot_df["umap_2"] = umap_embeddings[:, 1]
+        
+        # Handle missing values
+        plot_df = plot_df.dropna(subset=[col])
+        
+        # Create figure
+        plt.figure(figsize=figsize)
+        
+        # Determine color palette based on number of unique values
+        unique_values = plot_df[col].nunique()
+        
+        if unique_values <= 10:
+            # Use categorical palette for few categories
+            palette = sns.color_palette("colorblind", n_colors=unique_values)
+        elif unique_values <= 20:
+            # Use larger palette for more categories
+            palette = sns.color_palette("tab20", n_colors=unique_values)
+        else:
+            # Use continuous colormap for many values
+            palette = "viridis"
+        
+        # Create scatter plot
+        if plot_df[col].dtype in ['object', 'category'] or unique_values <= 20:
+            # Categorical coloring
+            sns.scatterplot(
+                data=plot_df,
+                x="umap_1",
+                y="umap_2",
+                hue=col,
+                palette=palette,
+                s=40,
+                alpha=0.7
+            )
+        else:
+            # Continuous coloring for numerical data
+            scatter = plt.scatter(
+                plot_df["umap_1"],
+                plot_df["umap_2"],
+                c=plot_df[col],
+                cmap=palette,
+                s=40,
+                alpha=0.7
+            )
+            plt.colorbar(scatter, label=col)
+        
+        # Customize plot
+        plt.title(f"UMAP Visualization - Colored by {col}", fontsize=16)
+        plt.xlabel("UMAP Dimension 1", fontsize=13)
+        plt.ylabel("UMAP Dimension 2", fontsize=13)
+        
+        # Adjust legend if it exists
+        if plt.gca().get_legend() is not None:
+            plt.legend(title=col, fontsize=10, title_fontsize=11, 
+                      bbox_to_anchor=(1.05, 1), loc='upper left', frameon=True)
+        
+        plt.tight_layout()
+        
+        # Store results
+        results[col] = (plt.gcf(), plot_df.copy())
+        
+        # Show plot
+        plt.show()
+    
+    return results
 
-    sns.scatterplot(
-        data=plot_df,
-        x="umap_1",
-        y="umap_2",
-        hue="Diagnosis",
-        palette=diagnosis_colors,
-        s=40,         # kleinere Punkte
-        alpha=0.6     # etwas transparenter für bessere Lesbarkeit
-    )
 
-    plt.title("UMAP Visualization of Latent Space", fontsize=16)
-    plt.xlabel("UMAP Dimension 1", fontsize=13)
-    plt.ylabel("UMAP Dimension 2", fontsize=13)
-    plt.legend(title="Diagnosis", fontsize=11, title_fontsize=12, loc="best", frameon=True)
-
-    return plt.gcf(), plot_df
+def save_latent_visualizations(results, output_dir, dpi=300):
+    """
+    Save all generated visualizations to files.
+    
+    Args:
+        results: Dictionary returned by visualize_embeddings_multiple
+        output_dir: Directory to save plots
+        dpi: Resolution for saved images
+    """
+    
+    # Create output directory if it doesn't exist
+    os.makedirs(output_dir, exist_ok=True)
+    
+    for col_name, (fig, plot_df) in results.items():
+        # Clean column name for filename
+        clean_name = col_name.replace(" ", "_").replace("/", "_").replace("\\", "_")
+        
+        # Save figure
+        fig.savefig(
+            os.path.join(output_dir, f"umap_{clean_name}.png"),
+            dpi=dpi,
+            bbox_inches='tight',
+            facecolor='white'
+        )
+        
+        print(f"Saved visualization for '{col_name}'")
 
 
 def extract_roi_names(h5_file_path, volume_type):
@@ -692,8 +1263,8 @@ def analyze_regional_deviations(results_df, save_dir, clinical_data_path, volume
     named_results_df.rename(columns=roi_mapping, inplace=True)
     
     # Save the version with ROI names
-    os.makedirs(save_dir, exist_ok=True)
-    named_results_df.to_csv(f"{save_dir}/deviation_scores_with_roi_names.csv", index=False)
+    # os.makedirs(save_dir, exist_ok=True)
+    # named_results_df.to_csv(f"{save_dir}/deviation_scores_with_roi_names.csv", index=False)
     
     # Get diagnoses
     diagnoses = results_df["Diagnosis"].unique()
@@ -799,7 +1370,7 @@ def analyze_regional_deviations(results_df, save_dir, clinical_data_path, volume
     effect_sizes_df["Abs_Cohens_d"] = effect_sizes_df["Cohens_d"].abs()
     
     # Save complete effect sizes
-    effect_sizes_df.to_csv(f"{save_dir}/regional_effect_sizes_vs_{norm_diagnosis}.csv", index=False)
+    # effect_sizes_df.to_csv(f"{save_dir}/regional_effect_sizes_vs_{norm_diagnosis}.csv", index=False)
     
     # Create figures directory
     os.makedirs(f"{save_dir}/figures", exist_ok=True)
@@ -860,7 +1431,7 @@ def analyze_regional_deviations(results_df, save_dir, clinical_data_path, volume
         plt.close()
         
         # Also save the top regions data
-        top_regions.to_csv(f"{save_dir}/top20_regions_{diagnosis}_vs_{norm_diagnosis}.csv", index=False)
+        # top_regions.to_csv(f"{save_dir}/top20_regions_{diagnosis}_vs_{norm_diagnosis}.csv", index=False)
     
     # Create a summary visualization showing the overall distribution of effects
     plt.figure(figsize=(10, 6))
@@ -916,7 +1487,7 @@ def analyze_regional_deviations(results_df, save_dir, clinical_data_path, volume
         plt.close()
         
         # Save heatmap data
-        heatmap_df.to_csv(f"{save_dir}/top_regions_heatmap_data_vs_{norm_diagnosis}.csv")
+        # heatmap_df.to_csv(f"{save_dir}/top_regions_heatmap_data_vs_{norm_diagnosis}.csv")
     
     print(f"\nRegional analysis completed. Results saved to {save_dir}")
     print(f"Total effect sizes calculated: {len(effect_sizes_df)}")
