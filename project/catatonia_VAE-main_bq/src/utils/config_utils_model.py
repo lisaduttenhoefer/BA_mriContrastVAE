@@ -2,24 +2,18 @@ import os
 import subprocess as sp
 from datetime import datetime, timedelta
 from typing import List
-
 import torch
 
+
 def get_free_gpu() -> torch.device:
-    """
-    Get the GPU with the most available memory,
-    Falls back to CPU if no GPU is available or if there's an error accessing the GPUs.
+    #Get the GPU with the most available memory,
+    #Falls back to CPU if no GPU is available or if there's an error accessing the GPUs
     
-    Returns:s
-        torch.device: Device with the most free memory
-    """
     # check if cuda is available
     if not torch.cuda.is_available():
         print("CUDA is not available. Using CPU instead.")
         return torch.device("cpu")
-    
     try:
-        # Get the number of GPUs available
         num_gpus = torch.cuda.device_count()
         
         if num_gpus == 0:
@@ -45,7 +39,7 @@ def get_free_gpu() -> torch.device:
             # Check if we have memory data for all GPUs
             if len(memory_free_values) != num_gpus:
                 print(f"Warning: nvidia-smi reported {len(memory_free_values)} GPUs, but torch.cuda sees {num_gpus}.")
-                print(f"Using the first available GPU (cuda:0) to be safe.")
+                print(f"Using the first available GPU to be safe.")
                 return torch.device("cuda:0")
                 
             # Get the GPU with the most free memory
@@ -55,7 +49,7 @@ def get_free_gpu() -> torch.device:
             
         except (sp.SubprocessError, ValueError, IndexError) as e:
             print(f"Error getting GPU memory info: {e}")
-            print(f"Falling back to first available GPU (cuda:0)")
+            print(f"Falling back to first available GPU")
             return torch.device("cuda:0")
             
     except Exception as e:
@@ -63,7 +57,8 @@ def get_free_gpu() -> torch.device:
         print("Falling back to CPU")
         return torch.device("cpu")
 
-
+#======================================================================================================================================
+#CONFIG CLASS DEFINITION (2D)
 class Config_2D:
 
     def __init__(
@@ -75,7 +70,6 @@ class Config_2D:
         # The batch size of the data loaders
         BATCH_SIZE: int,
         # The total number of epochs to train the model for
-        # If loading a pre-trained model, this is the number of additional epochs to train for
         TOTAL_EPOCHS: int,
         # The weight of the reconstruction loss of the model
         RECON_LOSS_WEIGHT: float,

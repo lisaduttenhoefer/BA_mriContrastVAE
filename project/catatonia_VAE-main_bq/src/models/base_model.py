@@ -1,5 +1,4 @@
 from typing import Dict, List
-
 import pandas as pd
 import torch
 import torch.nn.functional as F
@@ -7,9 +6,8 @@ import torch.nn.functional as F
 from utils.logging_utils import log_and_print
 
 """
-These are basic functions ever model can make use of.
+These are basic functions ever model can make use of. -> prior Code to base the other models on 
 """
-
 
 # This function takes the existing model metrics as a DataFrame and the metrics of the current epoch as a list of dictionaries.
 # Each dictionary can contain metrics for multiple losses, e.g. {"valid_loss": 0.5, "v_recon_loss": 0.3, "v_kldiv_loss": 0.2}.

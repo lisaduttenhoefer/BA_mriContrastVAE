@@ -1,4 +1,3 @@
-
 import argparse
 import os
 import h5py
@@ -14,16 +13,17 @@ import seaborn as sns
 import torch
 from torch.utils.data import DataLoader, TensorDataset
 from scipy import stats
+from scipy import stats as scipy_stats
 from sklearn.metrics import roc_curve, auc, precision_recall_curve
 import umap
 from sklearn.preprocessing import StandardScaler
 
+#helper function 1 for dev_score plotting
+# Creates a summary table showing statistics for each diagnosis group colored by the color column
+#for colored jitter plots 
 def create_color_summary_table(data, metric, color_col, diagnoses, save_dir):
-    """
-    Create a summary table showing statistics for each diagnosis group colored by the color column.
-    """
-    summary_stats = []
     
+    summary_stats = []
     for diagnosis in diagnoses:
         diag_data = data[data['Diagnosis_x'] == diagnosis]
         
@@ -55,133 +55,79 @@ def create_color_summary_table(data, metric, color_col, diagnoses, save_dir):
     
     summary_df = pd.DataFrame(summary_stats)
     
-    # Save the summary table
-    #table_filename = f"{metric}_summary_by_{color_col}.csv"
-    # summary_df.to_csv(f"{save_dir}/figures/distributions/colored_by_columns/{table_filename}", 
-    #                  index=False)
-    
     return summary_df
 
 def create_colored_jitter_plots(data, metadata_df, metric, summary_df, plot_order, norm_diagnosis, 
                                save_dir, color_columns, diagnosis_palette):
-    """
-    Create jitter plots colored by numerical values from specified columns.
+    #Create jitter plots colored by numerical values from specified columns
+    #data: results dataset containing the metric and diagnosis information
+    #metadata_df: Additional dataframe containing metadata columns for coloring (scores etc)
     
-    Parameters:
-    -----------
-    data : DataFrame
-        The main dataset containing the metric and diagnosis information
-    metadata_df : DataFrame
-        Additional dataframe containing metadata columns for coloring
-        Expected to have same structure as shown in the image (Unnamed: 0, Filename, Dataset, etc.)
-    metric : str
-        The metric column name to plot on x-axis
-    summary_df : DataFrame
-        Summary statistics DataFrame
-    plot_order : list
-        Order of diagnoses for plotting
-    norm_diagnosis : str
-        Reference diagnosis group
-    save_dir : str
-        Directory to save plots
-    color_columns : list
-        List of column names to use for coloring (from metadata_df)
-    diagnosis_palette : dict
-        Color palette for diagnoses
-    """
-    
-    # Create directories if they don't exist
     os.makedirs(f"{save_dir}/figures/distributions/colored_by_columns", exist_ok=True)
     
-    # Merge the main data with metadata
-    # First, let's identify the common column for merging
-    # Assuming 'Filename' in metadata corresponds to subject identifiers in main data
-    
     # Check if we can merge on filename or need to use index
-    if 'Filename' in metadata_df.columns and 'Filename' in data.columns:
-        merged_data = pd.merge(data, metadata_df, on='Filename', how='inner')
-        print(f"Merged data on 'Filename' column. Merged data shape: {merged_data.shape}")
-    elif 'Unnamed: 0' in metadata_df.columns:
-        # Try merging on index if Unnamed: 0 contains the subject identifiers
-        metadata_df_indexed = metadata_df.set_index('Unnamed: 0')
-        merged_data = data.join(metadata_df_indexed, how='inner')
-        print(f"Merged data on index. Merged data shape: {merged_data.shape}")
-    else:
-        # Try merging on index directly
-        merged_data = data.join(metadata_df, how='inner', rsuffix='_meta')
-        print(f"Merged data on index directly. Merged data shape: {merged_data.shape}")
+    merged_data = pd.merge(data, metadata_df, on='Filename', how='inner')
+    print(f"Merged data on 'Filename' column. Merged data shape: {merged_data.shape}")
     
     if merged_data.empty:
         print("Error: Could not merge data and metadata. Check if they have common identifiers.")
         return
-    
+    #changed column names after merging
     merged_data = merged_data.rename(columns={'Age_x': 'Age', 'Sex_x': 'Sex'})
     
     # Filter color_columns to only include ones that exist in merged_data
     available_color_columns = [col for col in color_columns if col in merged_data.columns]
     
-    
-    # Define columns that have complete data for all diagnoses vs. limited diagnoses
+    # Define columns that have complete data (all patients) for all diagnoses vs. limited diagnoses (WhiteCAT & NSS metadata)
     complete_data_columns = ['Age', 'Sex']  # Assuming these have data for all diagnoses
     limited_data_columns = [col for col in available_color_columns if col not in complete_data_columns]
     
     for color_col in available_color_columns:
         print(f"Creating plot for column: {color_col}")
         
-        # Determine which diagnoses to include based on data availability
+        
         if color_col in complete_data_columns:
-            # Use all diagnoses for Age and Sex
+            # Use all diagnoses for Age and Sex -> got metadata for all
             current_plot_order = plot_order
             filtered_data = merged_data.copy()
             plot_title_suffix = "All Diagnoses"
         else:
-            # Use only CTT-SCHZ and CTT-MDD for other columns
+            # Use only CTT-SCHZ and CTT-MDD for other columns -> got metadata only for WhiteCAT and NSS patients
             current_plot_order = ['CTT-SCHZ', 'CTT-MDD']
             filtered_data = merged_data[merged_data['Diagnosis_x'].isin(current_plot_order)].copy()
             plot_title_suffix = "CTT-SCHZ vs CTT-MDD"
         
-        # Remove rows where the color column has missing values
         filtered_data = filtered_data.dropna(subset=[color_col, metric])
         
         if len(filtered_data) == 0:
             print(f"Warning: No data available for {color_col} after removing missing values. Skipping this column.")
             continue
         
-        # Create the plot
+        
         plt.figure(figsize=(14, 6))
-        
-        # Get the color values for the current column
         color_values = filtered_data[color_col].copy()
-        
         # Handle categorical variables by converting to numeric
         if color_values.dtype == 'object' or color_col in ['Sex', 'Co_Diagnosis']:
-            # For categorical variables, convert to numeric codes
             unique_values = color_values.unique()
             value_to_code = {val: i for i, val in enumerate(unique_values)}
             color_values_numeric = color_values.map(value_to_code)
-            
-            # Create discrete colormap for categorical variables
             if color_col == 'Sex':
-                # Use specific colors for sex
-                colors = ['#ff69b4', '#4169e1']  # Pink for first category, blue for second
+                colors = ['#ff69b4', '#4169e1'] 
                 if len(unique_values) == 2:
                     cmap = LinearSegmentedColormap.from_list('sex_colors', colors, N=2)
                 else:
                     cmap = plt.cm.Set1
             else:
-                # Use Set1 colormap for other categorical variables
                 cmap = plt.cm.Set1
                 
             color_values = color_values_numeric
             categorical_labels = unique_values
             is_categorical = True
         else:
-            # For continuous variables, use a continuous colormap
             cmap = plt.cm.viridis
             categorical_labels = None
             is_categorical = False
         
-        # Create the jitter plot with colors
         scatter = plt.scatter(filtered_data[metric], 
                             [current_plot_order.index(diag) for diag in filtered_data['Diagnosis_x']], 
                             c=color_values, 
@@ -190,8 +136,7 @@ def create_colored_jitter_plots(data, metadata_df, metric, summary_df, plot_orde
                             alpha=0.7,
                             edgecolors='white',
                             linewidth=0.5)
-        
-        # Add jitter to y-axis
+       
         y_positions = [current_plot_order.index(diag) for diag in filtered_data['Diagnosis_x']]
         jitter_strength = 0.3
         y_jittered = [y + np.random.uniform(-jitter_strength, jitter_strength) for y in y_positions]
@@ -212,7 +157,6 @@ def create_colored_jitter_plots(data, metadata_df, metric, summary_df, plot_orde
         # Add colorbar with appropriate labels
         cbar = plt.colorbar(scatter)
         if is_categorical and categorical_labels is not None:
-            # For categorical variables, set discrete tick labels
             cbar.set_ticks(range(len(categorical_labels)))
             cbar.set_ticklabels(categorical_labels)
             cbar.set_label(f'{color_col.replace("_", " ").title()}', rotation=270, labelpad=20)
@@ -238,142 +182,42 @@ def create_colored_jitter_plots(data, metadata_df, metric, summary_df, plot_orde
                           marker='D', alpha=0.9, zorder=11, 
                           edgecolors='white', linewidth=1)
         
-        # Customize the plot
+    
         plt.yticks(range(len(current_plot_order)), current_plot_order)
         plt.title(f"{metric.replace('_', ' ').title()} by Diagnosis\nColored by {color_col.replace('_', ' ').title()} ({plot_title_suffix})", 
                  fontsize=14, pad=20)
         plt.xlabel(f"{metric.replace('_', ' ').title()}", fontsize=12)
         plt.ylabel("Diagnosis", fontsize=12)
-        
-        # Add grid for better readability
         plt.grid(True, alpha=0.3, axis='x')
-        
-        # Invert y-axis to match original plot order
         plt.gca().invert_yaxis()
-        
         sns.despine()
         plt.tight_layout()
         
-        # Save the plot
         filename = f"{metric}_jitterplot_colored_by_{color_col}.png"
         plt.savefig(f"{save_dir}/figures/distributions/colored_by_columns/{filename}", 
                    dpi=300, bbox_inches='tight')
         plt.close()
-
-        # Create a summary statistics table for this color variable using merged data
         create_color_summary_table(filtered_data, metric, color_col, current_plot_order, save_dir)
-
-
-def create_correlation_heatmap_with_metadata(merged_data, metric, color_columns, diagnoses, save_dir):
-    """
-    Create correlation heatmaps between the metric and color variables for each diagnosis.
-    Uses merged data that includes both deviation scores and metadata.
-    """
-    plt.figure(figsize=(12, 8))
-    
-    correlation_data = []
-    
-    # Filter to only numerical columns for correlation
-    numerical_columns = []
-    for col in color_columns:
-        if col in merged_data.columns:
-            # Check if column is numerical (not object/categorical)
-            if merged_data[col].dtype in ['int64', 'float64', 'int32', 'float32'] and col not in ['Sex', 'Co_Diagnosis']:
-                numerical_columns.append(col)
-    
-    if len(numerical_columns) == 0:
-        print(f"Warning: No numerical columns found for correlation analysis with {metric}")
-        return None
-    
-    for diagnosis in diagnoses:
-        diag_data = merged_data[merged_data['Diagnosis'] == diagnosis]
-        corr_row = {'Diagnosis': diagnosis}
-        
-        for col in numerical_columns:
-            if col in diag_data.columns and not diag_data[col].isna().all():
-                # Calculate correlation, handling missing values
-                valid_data = diag_data[[metric, col]].dropna()
-                if len(valid_data) > 1:
-                    corr_val = valid_data[metric].corr(valid_data[col])
-                    corr_row[col] = corr_val
-                else:
-                    corr_row[col] = np.nan
-            else:
-                corr_row[col] = np.nan
-        
-        correlation_data.append(corr_row)
-    
-    if len(correlation_data) == 0:
-        print(f"Warning: No correlation data available for {metric}")
-        return None
-    
-    corr_df = pd.DataFrame(correlation_data)
-    corr_df = corr_df.set_index('Diagnosis')
-    
-    if corr_df.empty:
-        print(f"Warning: Empty correlation dataframe for {metric}")
-        return None
-    
-    # Create heatmap
-    plt.figure(figsize=(max(14, len(numerical_columns) * 1.2), 6))
-    mask = corr_df.isna()
-    
-    sns.heatmap(corr_df, annot=True, cmap='RdBu_r', center=0, 
-                square=True, fmt='.3f', cbar_kws={"shrink": .8},
-                mask=mask)
-    
-    plt.title(f'Correlation between {metric.replace("_", " ").title()} and Numerical Variables by Diagnosis')
-    plt.xlabel('Variables')
-    plt.ylabel('Diagnosis')
-    plt.xticks(rotation=45, ha='right')
-    plt.tight_layout()
-    
-    # Save correlation heatmap
-    plt.savefig(f"{save_dir}/figures/distributions/colored_by_columns/{metric}_correlation_heatmap.png", 
-               dpi=300, bbox_inches='tight')
-    plt.close()
-    
-    # Save correlation data
-    corr_df.to_csv(f"{save_dir}/figures/distributions/colored_by_columns/{metric}_correlations.csv")
-    
-    return corr_df
-
+ 
 def calculate_deviations(normative_models, data_tensor, norm_diagnosis, annotations_df, device="cuda"):
-    """
-    Calculate deviation scores using bootstrap models, ensuring perfect alignment
-    between data tensor and annotations.
-    
-    Args:
-        normative_models: List of trained normative VAE models
-        data_tensor: Tensor of input data to evaluate
-        annotations_df: DataFrame with subject metadata
-        device: Computing device
-        
-    Returns:
-        DataFrame with deviation scores for each subject
-    """
+   
+    # Calculate deviation scores using bootstrap models
 
-    # Verify data alignment
     total_models = len(normative_models)
     total_subjects = data_tensor.shape[0]
     
-    # Check for size mismatch and report
     if total_subjects != len(annotations_df):
         print(f"WARNING: Size mismatch detected: {total_subjects} samples in data tensor vs {len(annotations_df)} rows in annotations")
-        #print("Creating properly aligned dataset by extracting common subjects...")
-
+    
         # Get filenames in annotations_df
         filenames = annotations_df["Filename"].tolist()
         
         # Create a new annotations_df with only rows that have matching data
         valid_indices = list(range(min(total_subjects, len(annotations_df))))
         aligned_annotations = annotations_df.iloc[valid_indices].reset_index(drop=True)
-        
-        # Use these for processing
+      
         annotations_df = aligned_annotations
-        #print(f"Aligned datasets - working with {len(annotations_df)} subjects")
-    
-    # Prepare arrays to store results
+
     all_recon_errors = np.zeros((total_subjects, total_models))
     all_kl_divs = np.zeros((total_subjects, total_models))
     all_z_scores = np.zeros((total_subjects, data_tensor.shape[1], total_models))
@@ -399,6 +243,7 @@ def calculate_deviations(normative_models, data_tensor, norm_diagnosis, annotati
             all_kl_divs[:, i] = kl_div
             
             #---------------------------------------------CALCULATE REGION-WISE-Z-SCORES ---------------------------------------------------------------
+            #does not get used anymore
             z_scores = ((batch_data - recon) ** 2).cpu().numpy()
             all_z_scores[:, :, i] = z_scores
         
@@ -429,15 +274,11 @@ def calculate_deviations(normative_models, data_tensor, norm_diagnosis, annotati
         columns=[f"region_{i}_z_score" for i in range(mean_region_z_scores.shape[1])]
     )
 
-    # Efficiently concatenate instead of inserting columns one by one
     results_df = pd.concat([results_df, new_columns], axis=1)
 
     #-------------------------------------------- CALCULATE COMBINED DEVIATION SCORE ---------------------------------------------------------------
     # Normalize both metrics to 0-1 range for easier interpretation
-    
-    #=== IMPROVED DEVIATION SCORE CALCULATION ===
-    
-    # Method 1: Z-score normalization (preserves relative differences better)
+    #Z-score normalization
     scaler_recon = StandardScaler()
     scaler_kl = StandardScaler()
     
@@ -447,12 +288,12 @@ def calculate_deviations(normative_models, data_tensor, norm_diagnosis, annotati
     # Combined deviation score (Z-score based)
     results_df["deviation_score_zscore"] = (z_norm_recon + z_norm_kl) / 2
     
-    # Method 2: Percentile-based scoring
+    #Percentile-based scoring
     recon_percentiles = stats.rankdata(mean_recon_error) / len(mean_recon_error)
     kl_percentiles = stats.rankdata(mean_kl_div) / len(mean_kl_div)
     results_df["deviation_score_percentile"] = (recon_percentiles + kl_percentiles) / 2
     
-    # Method 3: Original min-max (FIXED)
+    #Original min-max
     min_recon = results_df["reconstruction_error"].min()
     max_recon = results_df["reconstruction_error"].max()
     norm_recon = (results_df["reconstruction_error"] - min_recon) / (max_recon - min_recon)
@@ -468,12 +309,8 @@ def calculate_deviations(normative_models, data_tensor, norm_diagnosis, annotati
 
 
 def calculate_group_pvalues(results_df, norm_diagnosis):
-    """
-    Calculate p-values for each diagnosis group compared to the control group.
-    Returns a dictionary with p-values for each metric and diagnosis.
-    """
-    from scipy import stats as scipy_stats
-    
+    #Calculate p-values for each diagnosis group compared to the control group
+
     # Get control group data
     control_mask = results_df["Diagnosis"] == norm_diagnosis
     if not control_mask.any():
@@ -500,30 +337,12 @@ def calculate_group_pvalues(results_df, norm_diagnosis):
         group_pvalues[metric] = {}
         control_values = control_data[metric].values
         
-        print(f"\n{metric.upper()} - Control group stats:")
-        print(f"  Mean: {control_values.mean():.4f}, Std: {control_values.std():.4f}")
-        print(f"  Min: {control_values.min():.4f}, Max: {control_values.max():.4f}")
-        
         for diagnosis in diagnoses:
             group_data = results_df[results_df["Diagnosis"] == diagnosis]
             if len(group_data) > 0:
                 group_values = group_data[metric].values
-                
-                print(f"  {diagnosis} (n={len(group_values)}):")
-                print(f"    Mean: {group_values.mean():.4f}, Std: {group_values.std():.4f}")
-                print(f"    Min: {group_values.min():.4f}, Max: {group_values.max():.4f}")
-                
-                # Check for identical distributions (which would cause issues)
-                if np.array_equal(group_values, control_values):
-                    print(f"    WARNING: Identical distributions detected!")
-                    group_pvalues[metric][diagnosis] = 1.0
-                    continue
-                
-                # Check if there's any overlap in values
-                overlap = len(np.intersect1d(group_values, control_values))
-                print(f"    Overlapping values: {overlap}")
-                
-                # Use Mann-Whitney U test (non-parametric) - more robust
+               
+                # Use Mann-Whitney U test (non-parametric) 
                 try:
                     statistic, p_value = scipy_stats.mannwhitneyu(
                         group_values, control_values, 
@@ -539,25 +358,11 @@ def calculate_group_pvalues(results_df, norm_diagnosis):
                     print(f"    T-test (comparison): t={t_stat:.2f}, p={t_pval:.6f}")
                     
                     group_pvalues[metric][diagnosis] = p_value
-                    
-                except Exception as e:
-                    print(f"    ERROR in statistical test: {e}")
-                    # Try t-test as fallback
-                    try:
-                        statistic, p_value = scipy_stats.ttest_ind(
-                            group_values, control_values, 
-                            equal_var=False
-                        )
-                        print(f"    Fallback t-test: t={statistic:.2f}, p={p_value:.6f}")
-                        group_pvalues[metric][diagnosis] = p_value
-                    except Exception as e2:
-                        print(f"    ERROR in fallback test: {e2}")
-                        group_pvalues[metric][diagnosis] = np.nan
     
     return group_pvalues
 
-def plot_deviation_distributions(results_df, save_dir, col_jitter, norm_diagnosis="HC"):
-    """Plot distributions of deviation metrics by diagnosis group with group p-values."""
+def plot_deviation_distributions(results_df, save_dir, col_jitter, norm_diagnosis):
+    #Plot distributions of deviation metrics by diagnosis group with group p-values
 
     os.makedirs(f"{save_dir}/figures/distributions", exist_ok=True)
     
@@ -607,21 +412,17 @@ def plot_deviation_distributions(results_df, save_dir, col_jitter, norm_diagnosi
     
     # Plot violin plots for all metrics
     plt.figure(figsize=(15, 10))
-    
     plt.subplot(3, 1, 1)
     sns.violinplot(data=results_df, x="Diagnosis", y="reconstruction_error", palette=diagnosis_palette)
     plt.title("Reconstruction Error by Diagnosis", fontsize=14)
     plt.xlabel("")
-    
     plt.subplot(3, 1, 2)
     sns.violinplot(data=results_df, x="Diagnosis", y="kl_divergence", hue="Diagnosis", palette=diagnosis_palette, legend = False)
     plt.title("KL Divergence by Diagnosis", fontsize=14)
     plt.xlabel("")
-    
     plt.subplot(3, 1, 3)
     sns.violinplot(data=results_df, x="Diagnosis", y="deviation_score", palette=diagnosis_palette)
     plt.title("Combined Deviation Score by Diagnosis", fontsize=14)
-    
     plt.tight_layout()
     plt.savefig(f"{save_dir}/figures/distributions/metrics_violin_plots.png", dpi=300)
     plt.close()
@@ -636,7 +437,6 @@ def plot_deviation_distributions(results_df, save_dir, col_jitter, norm_diagnosi
         # Filter data for selected diagnoses
         filtered_data = results_df[results_df["Diagnosis"].isin(selected_diagnoses)]
         
-        # Calculate summary statistics
         summary_df = (
             filtered_data
             .groupby("Diagnosis")[metric]
@@ -651,13 +451,12 @@ def plot_deviation_distributions(results_df, save_dir, col_jitter, norm_diagnosi
         summary_df["p_value"] = summary_df["Diagnosis"].map(
             lambda d: group_pvalues[metric].get(d, np.nan) if d != norm_diagnosis else np.nan
         )
-        
+        ###########################################################################################################################
         # Sort in desired order (for display from bottom to top)
         diagnosis_order_plot = selected_diagnoses[::-1]
         summary_df["Diagnosis"] = pd.Categorical(summary_df["Diagnosis"], categories=diagnosis_order_plot, ordered=True)
         summary_df = summary_df.sort_values("Diagnosis")
         
-        # Store summary for later access
         summary_dict[metric] = summary_df
         
         # Create ORIGINAL ERRORBAR PLOT (from first code) - without jitter
