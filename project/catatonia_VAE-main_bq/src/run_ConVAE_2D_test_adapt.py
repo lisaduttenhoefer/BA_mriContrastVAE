@@ -57,7 +57,7 @@ def main(args):
     #--------------------------------------- NECESSARY ARGUMENTS -----------------------------------------------------
     # Default model directory - will be used if not provided via command line
     default_model_dir = "/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/analysis/TRAINING/norm_results_HC_0.7_neuromorphometrics_20250521_0641"
-    
+    metadata_df_complete = "/workspace/project/catatonia_VAE-main_bq/metadata_20250110/full_data_with_codiagnosis_and_scores.csv"
     # Use command line argument if provided, otherwise use default
     model_dir = args.model_dir if args.model_dir else default_model_dir
     #-----------------------------------------------------------------------------------------------------------------
@@ -271,7 +271,7 @@ def main(args):
     log_and_print_test("Generating visualizations...")
     
     # Plot deviation distributions
-    plot_deviation_distributions(results_df, save_dir, norm_diagnosis=norm_diagnosis)
+    plot_deviation_distributions(results_df, save_dir, norm_diagnosis=norm_diagnosis, col_jitter=False)
     log_and_print_test("Plotted deviation distributions")
     
     # Visualize embeddings in latent space
