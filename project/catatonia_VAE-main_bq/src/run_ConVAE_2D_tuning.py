@@ -19,7 +19,7 @@ from ray.air import config
 from ray.tune.logger import CSVLogger
 from torch.cuda.amp import GradScaler
 
-from models.ContrastVAE_2D_f import ContrastVAE_2D, train_ContrastVAE_2D
+from models.ContrastVAE_2D import ContrastVAE_2D, train_ContrastVAE_2D
 from utils.config_utils_model import Config_2D
 from utils.support_f import get_all_data, split_df
 from module.data_processing_hc import (

@@ -197,7 +197,7 @@ def main(atlas_name: list,volume_type, num_epochs: int, n_bootstraps: int,norm_d
         diagnoses=[norm_diagnosis],  # Only norm controls for normative model
         hdf5=True,
         train_or_test="train",
-        save=True,
+        save=False,
         volume_type=config.VOLUME_TYPE,
         valid_volume_types=config.VALID_VOLUME_TYPES,
     )
