@@ -24,6 +24,12 @@ def get_atlas(path: pathlib.PosixPath) -> str:
         atlas = match.group(1)
     return atlas
 
+def extract_measurements(subjects):
+    #Extract measurements from subjects as torch tensors
+    all_measurements = []
+    for subject in subjects:
+        all_measurements.append(torch.tensor(subject["measurements"]).squeeze())
+    return torch.stack(all_measurements)
 
 def combine_dfs(paths: list):
     # Combines any number of csv files to a single pandas DataFrame, keeping only shared column indices. 

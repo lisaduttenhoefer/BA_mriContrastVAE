@@ -39,10 +39,7 @@ from utils.logging_utils import (
     setup_logging,
     )
 
-## To-Do: Think about wether ALL plotting should be deactivated during tuning.
-#os.environ["TUNE_DISABLE_STRICT_METRIC_CHECKING"] = "1"
 
-# Use non-interactive plotting to avoid tmux crashes
 matplotlib.use("Agg")
 
 def create_arg_parser():  # For training several different models with run_training.sh file

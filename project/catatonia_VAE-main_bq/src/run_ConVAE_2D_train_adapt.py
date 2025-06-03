@@ -1,5 +1,6 @@
 import sys
 sys.path.append("/home/developer/.local/lib/python3.10/site-packages")
+sys.path.append("../src")
 import matplotlib
 import numpy as np
 import pandas as pd
@@ -7,10 +8,7 @@ import matplotlib.pyplot as plt
 import argparse
 import os
 from datetime import datetime
-import logging
-#from torchviz import make_dot
 from pathlib import Path
-sys.path.append("../src")
 import torch
 import torchio as tio
 from torch.cuda.amp import GradScaler
@@ -21,11 +19,8 @@ import torchio as tio
 from torch.utils.data import DataLoader
 from sklearn.decomposition import PCA
 from sklearn.manifold import TSNE
-import umap
-# Set non-interactive plotting to avoid tmux crashes
 matplotlib.use("Agg")
 
-sys.path.append("../src")
 
 from models.ContrastVAE_2D import (
     NormativeVAE_2D, 
@@ -33,7 +28,10 @@ from models.ContrastVAE_2D import (
     bootstrap_train_normative_models_plots
 )
 
-from utils.support_f import split_df_adapt
+from utils.support_f import (
+    split_df_adapt,
+    extract_measurements
+)
 from utils.config_utils_model import Config_2D
 
 from module.data_processing_hc import (
@@ -54,14 +52,9 @@ from utils.logging_utils import (
 )
 
 from utils.plotting_utils import (
-    plot_latent_space,
     plot_learning_curves,
     plot_bootstrap_metrics,
 )
-
-
-# Use non-interactive plotting to avoid tmux crashes
-matplotlib.use("Agg")
 
 def create_arg_parser():
     parser = argparse.ArgumentParser(description='Arguments for Normative Modeling Training')
@@ -81,12 +74,6 @@ def create_arg_parser():
     parser.add_argument('--output_dir', help='Override default output directory', default=None)
     return parser
 
-def extract_measurements(subjects):
-    """Extract measurements from subjects as torch tensors."""
-    all_measurements = []
-    for subject in subjects:
-        all_measurements.append(torch.tensor(subject["measurements"]).squeeze())
-    return torch.stack(all_measurements)
 
 def main(atlas_name: list,volume_type, num_epochs: int, n_bootstraps: int,norm_diagnosis: str, train_ratio: float, batch_size: int, learning_rate: float, 
          latent_dim: int, kldiv_weight: float, save_models: bool, no_cuda: bool, seed: int, output_dir: str = None):
@@ -94,6 +81,8 @@ def main(atlas_name: list,volume_type, num_epochs: int, n_bootstraps: int,norm_d
     # Set main paths
     path_original = "/workspace/project/catatonia_VAE-main_bq/metadata_20250110/full_data_with_codiagnosis_and_scores.csv"
     path_to_dir = "/workspace/project/catatonia_VAE-main_bq/data_training"
+    #splits the metadata file with ALL Patients in a training and test set depending on NORM diagnosis & given ratio 
+    #saves it for use in training and matching testing
     TRAIN_CSV, TEST_CSV = split_df_adapt(path_original, path_to_dir,norm_diagnosis,train_ratio,seed)
     
     joined_atlas_name = "_".join(str(a) for a in atlas_name if isinstance(a, str))
@@ -113,10 +102,9 @@ def main(atlas_name: list,volume_type, num_epochs: int, n_bootstraps: int,norm_d
     #os.makedirs(f"{save_dir}/figures/loss_curves", exist_ok=True)
     os.makedirs(f"{save_dir}/logs", exist_ok=True)
     os.makedirs(f"{save_dir}/data", exist_ok=True)    
-    # Set up configuration for the normative modeling
+
 
     config = Config_2D(
-        # General Parameters
         RUN_NAME=f"NormativeVAE20_{joined_atlas_name}_{timestamp}_{norm_diagnosis}",
         # Input / Output Paths
         TRAIN_CSV=[TRAIN_CSV],
@@ -125,7 +113,6 @@ def main(atlas_name: list,volume_type, num_epochs: int, n_bootstraps: int,norm_d
         ATLAS_NAME=atlas_name,
         PROC_DATA_PATH="/workspace/project/catatonia_VAE-main_bq/data_training/proc_extracted_xml_data",
         OUTPUT_DIR=save_dir,
-        # load_mri_data parameters
         VOLUME_TYPE=volume_type,
         VALID_VOLUME_TYPES=["Vgm", "Vwm", "Vcsf"],
         # Loading Model
@@ -134,13 +121,13 @@ def main(atlas_name: list,volume_type, num_epochs: int, n_bootstraps: int,norm_d
         PRETRAIN_METRICS_PATH=None,
         CONTINUE_FROM_EPOCH=0,
         # Loss Parameters
-        RECON_LOSS_WEIGHT= 16.6449, #vor tuning: 40.0
+        RECON_LOSS_WEIGHT= 16.6449, #before tuning: 40.0
         KLDIV_LOSS_WEIGHT=kldiv_weight, 
         CONTR_LOSS_WEIGHT=0.0,  # No contrastive loss for normative model
         # Learning and Regularization
         TOTAL_EPOCHS=num_epochs,
         LEARNING_RATE=learning_rate,
-        WEIGHT_DECAY=0.00356, #vor tuning 4e-3 
+        WEIGHT_DECAY=0.00356, #before tuning 4e-3 
         EARLY_STOPPING=True,
         STOP_LEARNING_RATE=4e-8,
         SCHEDULE_ON_VALIDATION=True,
@@ -194,7 +181,7 @@ def main(atlas_name: list,volume_type, num_epochs: int, n_bootstraps: int,norm_d
         csv_paths=config.TRAIN_CSV,
         data_path=config.MRI_DATA_PATH,
         atlas_name=config.ATLAS_NAME,
-        diagnoses=[norm_diagnosis],  # Only norm controls for normative model
+        diagnoses=[norm_diagnosis],  # Only norm controls for training of normative model
         hdf5=True,
         train_or_test="train",
         save=False,
@@ -213,12 +200,12 @@ def main(atlas_name: list,volume_type, num_epochs: int, n_bootstraps: int,norm_d
     len_atlas = len(subjects_norm[0]["measurements"])
     log_and_print(f"Number of ROIs in atlas: {len_atlas}")
 
-    # Split norm controls into train and validation
+    # Split norm controls metadata into train and validation
     train_annotations_norm, valid_annotations_norm = train_val_split_annotations(
         annotations=annotations_norm, 
         diagnoses=norm_diagnosis
     )
-    
+    #split the feature maps accordingly
     train_subjects_norm, valid_subjects_norm = train_val_split_subjects(
         subjects=subjects_norm, 
         train_ann=train_annotations_norm, 
@@ -251,7 +238,6 @@ def main(atlas_name: list,volume_type, num_epochs: int, n_bootstraps: int,norm_d
         batch_size=config.BATCH_SIZE,
         shuffle_data=config.SHUFFLE_DATA,
     )
-
     valid_loader_norm = process_subjects(
         subjects=valid_subjects_norm,
         batch_size=config.BATCH_SIZE,
@@ -272,7 +258,6 @@ def main(atlas_name: list,volume_type, num_epochs: int, n_bootstraps: int,norm_d
     ## 2. Prepare and Run Normative Modeling Pipeline --------------------------------
     # Initialize Model
     log_model_setup()
-    
 
     # Extract features as torch tensors
     train_data = extract_measurements(train_subjects_norm)

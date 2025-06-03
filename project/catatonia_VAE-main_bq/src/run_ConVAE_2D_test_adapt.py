@@ -1,3 +1,5 @@
+sys.path.append("../src")
+
 import argparse
 import os
 import sys
@@ -11,19 +13,15 @@ import seaborn as sns
 import torch
 from torch.utils.data import DataLoader, TensorDataset
 from scipy import stats
-import umap
-import re
 
-
-# Ensure we can import from parent directory
-sys.path.append("../src")
 from models.ContrastVAE_2D import NormativeVAE_2D
-from utils.support_f import get_all_data
+from utils.support_f import (
+    get_all_data,
+    extract_measurements
+)
 from utils.config_utils_model import Config_2D
 from module.data_processing_hc import (
     load_mri_data_2D,
-    #load_mri_data_2D_all_atlases,
-    #process_subjects,
 )
 from utils.logging_utils import (
     setup_logging_test, 
@@ -33,20 +31,11 @@ from utils.logging_utils import (
 from utils.dev_scores_utils import (
     calculate_deviations, 
     plot_deviation_distributions, 
-    #visualize_embeddings, 
     analyze_regional_deviations,
     extract_roi_names,
     save_latent_visualizations,
     visualize_embeddings_multiple
 )
-
-
-def extract_measurements(subjects):
-    """Extract measurements from subjects as torch tensors."""
-    all_measurements = []
-    for subject in subjects:
-        all_measurements.append(torch.tensor(subject["measurements"]).squeeze())
-    return torch.stack(all_measurements)
 
 
 def main(args):
@@ -57,7 +46,6 @@ def main(args):
     #--------------------------------------- NECESSARY ARGUMENTS -----------------------------------------------------
     # Default model directory - will be used if not provided via command line
     default_model_dir = "/raid/bq_lduttenhofer/project/catatonia_VAE-main_bq/analysis/TRAINING/norm_results_HC_0.7_neuromorphometrics_20250521_0641"
-    metadata_df_complete = "/workspace/project/catatonia_VAE-main_bq/metadata_20250110/full_data_with_codiagnosis_and_scores.csv"
     # Use command line argument if provided, otherwise use default
     model_dir = args.model_dir if args.model_dir else default_model_dir
     #-----------------------------------------------------------------------------------------------------------------
@@ -110,10 +98,8 @@ def main(args):
 
         valid_volume_types = eval(config_df["VALID_VOLUME_TYPES"].iloc[0]) if "VALID_VOLUME_TYPES" in config_df.columns else ["Vgm", "Vwm", "Vcsf"]
         metadata_test = config_df["TEST_CSV"].iloc[0] if "TEST_CSV" in config_df.columns else args.clinical_csv
-        # Training data path from config
         mri_data_path = config_df["MRI_DATA_PATH"].iloc[0] if "MRI_DATA_PATH" in config_df.columns else None
         
-        # Extract network architecture parameters if available
         hidden_dim_1 = 100  # Default
         hidden_dim_2 = 100  # Default
         
@@ -130,16 +116,6 @@ def main(args):
         log_and_print_test(f"Warning: Could not load config file properly. Error: {e}")
         log_and_print_test("Using command line arguments as fallback")
         
-        # atlas_name = args.atlas_name
-        # latent_dim = args.latent_dim
-        # norm_diagnosis = args.norm_diagnosis
-        # volume_type = "Vgm"
-        # valid_volume_types = ["Vgm", "Vwm", "Vcsf"]
-        # mri_data_path = mri_data_path
-        # metadata_test = args.testing_data
-        # hidden_dim_1 = 100
-        # hidden_dim_2 = 100
-    
     # Set device
     device = torch.device("cpu" if args.no_cuda or not torch.cuda.is_available() else "cuda")
     log_and_print_test(f"Using device: {device}")
@@ -167,12 +143,13 @@ def main(args):
             h5_file_path = None
             log_and_print_test("Warning: No HDF5 files found for ROI name extraction")
     print(metadata_test)
-    # Load clinical data using the same function as for healthy controls
+
+    # Load clinical data 
     subjects_dev, annotations_dev, roi_names = load_mri_data_2D(
-        csv_paths=[metadata_test],
+        csv_paths=[metadata_test], #already split and saved csf file from training
         data_path=path_to_clinical_data,
         atlas_name=atlas_name,
-        diagnoses=["HC", "SCHZ", "CTT", "MDD", "CTT-MDD", "CTT-SCHZ"],  # Only norm controls for normative model
+        diagnoses=["HC", "SCHZ", "CTT", "MDD", "CTT-MDD", "CTT-SCHZ"], #in testing use all instead of only NORM
         hdf5=True,
         train_or_test="test",
         save=True,
@@ -180,7 +157,6 @@ def main(args):
         valid_volume_types=valid_volume_types,
     )
     
-    # Extract measurements
     clinical_data = extract_measurements(subjects_dev)
     log_and_print_test(f"Clinical data shape: {clinical_data.shape}")
     
@@ -233,8 +209,8 @@ def main(args):
         # Load model weights
         model_path = os.path.join(models_dir, model_file)
         model.load_state_dict(torch.load(model_path, map_location="cpu"))
-        model.to(device) ##
-        model.eval()  # Set model to evaluation mode ##
+        model.to(device) 
+        model.eval()  # Set model to evaluation mode 
         bootstrap_models.append(model)
         log_and_print_test(f"Loaded model: {model_file}")
     
@@ -267,10 +243,8 @@ def main(args):
     results_df.to_csv(f"{save_dir}/deviation_scores.csv", index=False)
     log_and_print_test(f"Saved deviation scores to {save_dir}/deviation_scores.csv")
     
-    # Generate visualizations
     log_and_print_test("Generating visualizations...")
     
-    # Plot deviation distributions
     plot_deviation_distributions(results_df, save_dir, norm_diagnosis=norm_diagnosis, col_jitter=False)
     log_and_print_test("Plotted deviation distributions")
     
@@ -285,20 +259,17 @@ def main(args):
         columns_to_plot=["Co_Diagnosis", "Dataset", "Diagnosis", "Sex"]
     )
 
-    # Save all results
     save_latent_visualizations(results, output_dir=f"{save_dir}/figures/latent_embeddings")
     
     log_and_print_test("Saved latent space visualizations")
     
-    # Run statistical tests between groups
     log_and_print_test("Running statistical tests between groups...")
     
     ##------------------------------------------------ROI-WISE DEVIATION SCORES --------------------------------------------------
     log_and_print_test("Analyzing regional deviations...")
     
-    # Create supplementary files for debugging and reference
     if h5_file_path and os.path.exists(h5_file_path):
-        # Using our improved regional deviation analysis
+
         regional_results = analyze_regional_deviations(
             results_df=results_df,
             save_dir=save_dir,

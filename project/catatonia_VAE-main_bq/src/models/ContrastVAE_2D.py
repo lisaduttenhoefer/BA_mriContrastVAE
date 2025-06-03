@@ -47,8 +47,6 @@ from utils.logging_utils import (
 )
 from utils.plotting_utils import (
     latent_space_batch_plot,
-    latent_space_details_plot,
-    latent_space_plot,
     metrics_plot,
     recon_images_plot,
     plot_latent_space,
