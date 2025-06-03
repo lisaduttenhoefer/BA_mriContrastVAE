@@ -8,21 +8,11 @@ from utils.config_utils_model import Config_2D
 
 
 def log_and_print(message: str):
-    """
-    Log and print a message.
-    """
     logging.info(message)
     print(message)
 
 def log_and_print_test(message, logger=None, level=logging.INFO):
-    """
-    Log a message and print it to console.
     
-    Args:
-        message: Message to log and print
-        logger: Logger instance (if None, will only print)
-        level: Logging level (default: INFO)
-    """
     print("----------[INFO]",message)
     if logger:
         if level == logging.INFO:
@@ -35,14 +25,13 @@ def log_and_print_test(message, logger=None, level=logging.INFO):
             logger.debug(message)
 
 def setup_logging(config: Config_2D):
-    """
-    Set up logging for the training session.
+    
+    #Set up logging for the training session
 
-    """
     filename = os.path.join(
         config.LOGGING_DIR, f"{config.TIMESTAMP}_{config.RUN_NAME}_training_log_.txt"
     )
-    # Set the logging configuration
+    
     logging.basicConfig(
         filename=filename,
         level=logging.INFO,
@@ -50,13 +39,11 @@ def setup_logging(config: Config_2D):
         datefmt="%Y-%m-%d %H:%M:%S",
     )
 
-    # Log the initial configuration settings
     logging.info("Starting new training session")
     logging.info(f"Configuration:")
     for parameter, value in config.__dict__.items():
         logging.info(f"{parameter}: {value}")
 
-    # Print the start time
     title = f"Starting Catatonia CPA training session {config.RUN_NAME} at {config.TIMESTAMP}"
     print("")
     print("#" * 100)
@@ -77,30 +64,19 @@ def setup_logging(config: Config_2D):
     print("#" * 100)
     
 def setup_logging_test(log_file=None, log_level=logging.INFO):
-    """
-    Set up logging configuration.
     
-    Args:
-        log_file: Path to the log file. If None, logs only to console.
-        log_level: Logging level (default: INFO)
+    #Set up logging configuration
     
-    Returns:
-        Logger instance
-    """
-    # Create logger
     logger = logging.getLogger("normative_vae")
     logger.setLevel(log_level)
-    logger.handlers = []  # Clear any existing handlers
+    logger.handlers = []  
     
-    # Create formatter
     formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
     
-    # Create console handler
     console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setFormatter(formatter)
     logger.addHandler(console_handler)
     
-    # Create file handler if log_file is provided
     if log_file:
         file_handler = logging.FileHandler(log_file)
         file_handler.setFormatter(formatter)
@@ -194,9 +170,6 @@ def log_model_metrics(
     prefix: str = "",
     n_digits: int = 3,
 ):
-    """
-    Log training or validation metrics.
-    """
 
     metrics_log = ""
 
@@ -210,7 +183,6 @@ def log_model_metrics(
             combo = f"{metric:<13} {value:>7.1e},"
 
         metrics_log += f"{combo:<20}"
-
         # Print and reset every 4 metrics
         if i % 4 == 3:
             metrics_log = metrics_log[: metrics_log.rfind(",")]
