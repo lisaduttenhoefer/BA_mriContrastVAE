@@ -4,6 +4,7 @@ import regex as re
 import os
 import numpy as np
 from datetime import datetime
+import torch
 
 
 def flatten_array(df: pd.DataFrame) -> np.ndarray:

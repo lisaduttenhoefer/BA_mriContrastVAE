@@ -36,7 +36,7 @@ def create_color_summary_table(data, metric, color_col, diagnoses, save_dir):
         }
         
         # Handle categorical vs continuous variables for color column
-        if diag_data[color_col].dtype == 'object' or color_col in ['Sex', 'Co_Diagnosis']:
+        if diag_data[color_col].dtype == 'object' or color_col in ['Sex', 'Co_Diagnosis', 'Dataset']:
             # For categorical variables, show counts and percentages
             value_counts = diag_data[color_col].value_counts()
             for val, count in value_counts.items():
@@ -73,13 +73,13 @@ def create_colored_jitter_plots(data, metadata_df, metric, summary_df, plot_orde
         print("Error: Could not merge data and metadata. Check if they have common identifiers.")
         return
     #changed column names after merging
-    merged_data = merged_data.rename(columns={'Age_x': 'Age', 'Sex_x': 'Sex'})
+    merged_data = merged_data.rename(columns={'Age_x': 'Age', 'Sex_x': 'Sex', 'Dataset_x': 'Dataset'})
     
     # Filter color_columns to only include ones that exist in merged_data
     available_color_columns = [col for col in color_columns if col in merged_data.columns]
     
     # Define columns that have complete data (all patients) for all diagnoses vs. limited diagnoses (WhiteCAT & NSS metadata)
-    complete_data_columns = ['Age', 'Sex']  # Assuming these have data for all diagnoses
+    complete_data_columns = ['Age', 'Sex', 'Dataset']  # Assuming these have data for all diagnoses
     limited_data_columns = [col for col in available_color_columns if col not in complete_data_columns]
     
     for color_col in available_color_columns:
@@ -103,11 +103,11 @@ def create_colored_jitter_plots(data, metadata_df, metric, summary_df, plot_orde
             print(f"Warning: No data available for {color_col} after removing missing values. Skipping this column.")
             continue
         
-        
+    
         plt.figure(figsize=(14, 6))
         color_values = filtered_data[color_col].copy()
         # Handle categorical variables by converting to numeric
-        if color_values.dtype == 'object' or color_col in ['Sex', 'Co_Diagnosis']:
+        if color_values.dtype == 'object' or color_col in ['Sex', 'Co_Diagnosis', 'Dataset']:
             unique_values = color_values.unique()
             value_to_code = {val: i for i, val in enumerate(unique_values)}
             color_values_numeric = color_values.map(value_to_code)
@@ -358,6 +358,8 @@ def calculate_group_pvalues(results_df, norm_diagnosis):
                     print(f"    T-test (comparison): t={t_stat:.2f}, p={t_pval:.6f}")
                     
                     group_pvalues[metric][diagnosis] = p_value
+                except Exception as e:
+                    print(f"Error with statistical tests")
     
     return group_pvalues
 
@@ -530,7 +532,8 @@ def plot_deviation_distributions(results_df, save_dir, col_jitter, norm_diagnosi
         plt.title(f"{metric.replace('_', ' ').title()} by Diagnosis (vs {norm_diagnosis})", fontsize=14)
         plt.xlabel("Deviation Metric", fontsize=12)
         plt.ylabel("Diagnosis", fontsize=12)
-        plt.subplots_adjust(left=0.25) sns.despine()
+        plt.subplots_adjust(left=0.25) 
+        sns.despine()
         plt.tight_layout()
         plt.savefig(f"{save_dir}/figures/distributions/{metric}_jitterplot_with_values.png", dpi=300, bbox_inches='tight')
         plt.close()
@@ -538,10 +541,10 @@ def plot_deviation_distributions(results_df, save_dir, col_jitter, norm_diagnosi
         if col_jitter: 
             metadata_df = pd.read_csv('/workspace/project/catatonia_VAE-main_bq/metadata_20250110/full_data_with_codiagnosis_and_scores.csv')  
             #column names in the metadata df that should be used for coloring
-            potential_color_columns = ['Age', 'Sex',
-                                'GAF_Score', 'PANSS_Positive', 'PANSS_Negative', 
-                                    'PANSS_General', 'PANSS_Total', 'BPRS_Total', 'NCRS_Motor', 
-                                    'NCRS_Affective', 'NCRS_Behavioral', 'NCRS_Total', 'NSS_Motor', 'NSS_Total']
+            potential_color_columns = ['Age', 'Sex', 'Dataset',
+                                       'GAF_Score', 'PANSS_Positive', 'PANSS_Negative',
+                                       'PANSS_General', 'PANSS_Total', 'BPRS_Total', 'NCRS_Motor',
+                                       'NCRS_Affective', 'NCRS_Behavioral', 'NCRS_Total', 'NSS_Motor', 'NSS_Total']
 
             color_columns = [col for col in potential_color_columns if col in metadata_df.columns]
             print(f"Found {len(color_columns)} columns for coloring: {color_columns}")
@@ -585,7 +588,7 @@ def visualize_embeddings_multiple(normative_models, data_tensor, annotations_df,
     model.to(device)
     
     all_embeddings = []
-    batch_size = 32
+    batch_size = 16
     
     data_loader = DataLoader(
         TensorDataset(data_tensor),
@@ -754,9 +757,90 @@ def extract_roi_names(h5_file_path, volume_type):
             roi_names = [f"{atlas_name}_ROI_{i+1}" for i in range(100)]  
     return roi_names
 
+def calculate_cliffs_delta(x, y):
+    x = np.asarray(x)
+    y = np.asarray(y)
 
-def analyze_regional_deviations(results_df, save_dir, clinical_data_path, volume_type, atlas_name, roi_names, norm_diagnosis):
-   
+    # For each pair (x_i, y_j):
+    #  +1 if x_i > y_j
+    #  -1 if x_i < y_j
+    #   0 if x_i == y_j
+    dominance = np.zeros((len(x), len(y)))
+    for i, x_i in enumerate(x):
+        dominance[i] = np.sign(x_i - y)
+    
+    # Calculate Cliff's Delta as the mean of the dominance matrix
+    delta = np.mean(dominance)
+    
+    return delta
+
+# Function to create subgroups for Catatonia patients
+def create_catatonia_subgroups(results_df, metadata_df, subgroup_columns, high_low_thresholds):
+    #Create subgroups of Catatonia patients based on extended WHiteCAT & NSS metadata
+    subgroups = {}
+    
+    # Get Catatonia patients
+    ctt_patients = results_df[results_df["Diagnosis"].str.startswith("CTT")].copy()
+    print(f"Found Catatonia diagnoses: {ctt_patients['Diagnosis'].unique()}")
+        
+    if len(ctt_patients) == 0:
+        print("No CTT patients found for subgroup analysis")
+        return subgroups
+    
+    # Merge with metadata
+    if 'Filename' in ctt_patients.columns and 'Filename' in metadata_df.columns:
+        ctt_with_metadata = ctt_patients.merge(metadata_df, on='Filename', how='left')
+    else:
+        print("Warning: Could not merge metadata. Check ID column names.")
+        return subgroups
+    
+    # Create subgroups for each specified column
+    for col in subgroup_columns:
+        if col not in ctt_with_metadata.columns:
+            print(f"Warning: Column '{col}' not found in metadata")
+            continue
+        
+        # Remove rows with missing values for this column
+        valid_data = ctt_with_metadata.dropna(subset=[col])
+        
+        if len(valid_data) == 0:
+            print(f"Warning: No valid data for column '{col}'")
+            continue
+        
+        # Determine threshold
+        if col in high_low_thresholds:
+            threshold = high_low_thresholds[col]
+        else:
+            # Use median as default threshold
+            threshold = valid_data[col].median()
+            print(f"Using median threshold for {col}: {threshold}")
+        
+        # Create high and low subgroups
+        high_group = valid_data[valid_data[col] >= threshold]
+        low_group = valid_data[valid_data[col] < threshold]
+        
+        if len(high_group) > 0:
+            subgroups[f"CTT-high_{col}"] = high_group
+            print(f"Created CTT-high_{col} subgroup: n={len(high_group)}")
+        
+        if len(low_group) > 0:
+            subgroups[f"CTT-low_{col}"] = low_group
+            print(f"Created CTT-low_{col} subgroup: n={len(low_group)}")
+    
+    return subgroups
+
+def analyze_regional_deviations(
+        results_df, 
+        save_dir, 
+        clinical_data_path, 
+        volume_type, 
+        atlas_name, 
+        roi_names, 
+        norm_diagnosis,
+        add_catatonia_subgroups=False, 
+        metadata_path=None, 
+        subgroup_columns=None, 
+        high_low_thresholds=None):
     #Analyze regional deviations using ROI names 
     #regional effect sizes -> Cliff's Delta / Cohen's D
     
@@ -776,27 +860,21 @@ def analyze_regional_deviations(results_df, save_dir, clinical_data_path, volume
     if len(norm_data) == 0:
         print(f"Warning: No data found for normative diagnosis '{norm_diagnosis}'. Cannot calculate comparisons.")
         return pd.DataFrame()  
-    
-    # Function to calculate Cliff's Delta
-    def calculate_cliffs_delta(x, y):
-        x = np.asarray(x)
-        y = np.asarray(y)
-    
-        # For each pair (x_i, y_j):
-        #  +1 if x_i > y_j
-        #  -1 if x_i < y_j
-        #   0 if x_i == y_j
-        dominance = np.zeros((len(x), len(y)))
-        for i, x_i in enumerate(x):
-            dominance[i] = np.sign(x_i - y)
-        
-        # Calculate Cliff's Delta as the mean of the dominance matrix
-        delta = np.mean(dominance)
-        
-        return delta
 
     effect_sizes = []
     
+    # Create Catatonia subgroups if requested
+    catatonia_subgroups = {}
+    if add_catatonia_subgroups and metadata_path and subgroup_columns:
+        try:
+            metadata_df = pd.read_csv(metadata_path)
+            catatonia_subgroups = create_catatonia_subgroups(
+                results_df, metadata_df, subgroup_columns, 
+                high_low_thresholds
+            )
+        except Exception as e:
+            print(f"Error loading metadata or creating subgroups: {e}")
+
     # Skip normative group as we use it for comparison
     for diagnosis in diagnoses:
         if diagnosis == norm_diagnosis:
@@ -828,7 +906,6 @@ def analyze_regional_deviations(results_df, save_dir, clinical_data_path, volume
             
             # Calculate difference
             mean_diff = dx_mean - norm_mean
-            
             # Calculate Cliff's Delta between this diagnosis and normative group for this region
             cliff_delta = calculate_cliffs_delta(dx_region_values, norm_region_values)
             
@@ -856,6 +933,49 @@ def analyze_regional_deviations(results_df, save_dir, clinical_data_path, volume
                 "Cohens_d": cohens_d
             })
     
+    # Calculate effect sizes for Catatonia subgroups
+    for subgroup_name, subgroup_data in catatonia_subgroups.items():
+        print(f"Analyzing subgroup: {subgroup_name} (n={len(subgroup_data)}) vs {norm_diagnosis} (n={len(norm_data)})")
+        
+        for i, region_col in enumerate(region_cols):
+            roi_name = roi_names[i] if i < len(roi_names) else f"Region_{i+1}"
+            
+            subgroup_region_values = subgroup_data[region_col].values
+            norm_region_values = norm_data[region_col].values
+            
+            if len(subgroup_region_values) == 0 or len(norm_region_values) == 0:
+                continue
+            
+            # Calculate statistics
+            subgroup_mean = np.mean(subgroup_region_values)
+            subgroup_std = np.std(subgroup_region_values)
+            norm_mean = np.mean(norm_region_values)
+            norm_std = np.std(norm_region_values)
+            
+            mean_diff = subgroup_mean - norm_mean
+            cliff_delta = calculate_cliffs_delta(subgroup_region_values, norm_region_values)
+            
+            # Calculate Cohen's d
+            pooled_std = np.sqrt(((len(subgroup_region_values) - 1) * subgroup_std**2 + 
+                                  (len(norm_region_values) - 1) * norm_std**2) / 
+                                 (len(subgroup_region_values) + len(norm_region_values) - 2))
+            
+            cohens_d = mean_diff / pooled_std if pooled_std != 0 else 0
+            
+            effect_sizes.append({
+                "Diagnosis": subgroup_name,
+                "Vs_Norm_Diagnosis": norm_diagnosis,
+                "Region_Column": region_col,
+                "ROI_Name": roi_name,
+                "Diagnosis_Mean": subgroup_mean,
+                "Diagnosis_Std": subgroup_std,
+                "Norm_Mean": norm_mean,
+                "Norm_Std": norm_std,
+                "Mean_Difference": mean_diff,
+                "Cliffs_Delta": cliff_delta,
+                "Cohens_d": cohens_d
+            })
+
     # Skip normative group as we use it for comparison
     effect_sizes_df = pd.DataFrame(effect_sizes)
     
@@ -936,46 +1056,105 @@ def analyze_regional_deviations(results_df, save_dir, clinical_data_path, volume
     plt.savefig(f"{save_dir}/figures/effect_size_distributions_vs_{norm_diagnosis}.png", dpi=300, bbox_inches='tight')
     plt.close()
     
-    # Create heatmap of top regions across diagnoses
-    # Get top 30 regions overall by average absolute effect size
     region_avg_effects = effect_sizes_df.groupby("ROI_Name")["Abs_Cliffs_Delta"].mean().reset_index()
     top_regions_overall = region_avg_effects.sort_values("Abs_Cliffs_Delta", ascending=False).head(30)["ROI_Name"].values
-    
-    # Create matrix of effect sizes for these regions
+
+    # Create matrix of effect sizes for these regions including subgroups
     heatmap_data = []
+
+    # Get ALL diagnoses from the effect_sizes_df (includes original + subgroups)
+    all_diagnoses = effect_sizes_df["Diagnosis"].unique()  # This now includes subgroups
+    print(f"All diagnoses for heatmap: {all_diagnoses}")  # Debug print
+
     for region in top_regions_overall:
         row = {"ROI_Name": region}
-        for diagnosis in diagnoses:
-            if diagnosis == norm_diagnosis:
+        for diagnosis in all_diagnoses:
+            if diagnosis == norm_diagnosis:  # Skip normative diagnosis
                 continue
-            
+                
             region_data = effect_sizes_df[(effect_sizes_df["ROI_Name"] == region) & 
-                                         (effect_sizes_df["Diagnosis"] == diagnosis)]
+                                        (effect_sizes_df["Diagnosis"] == diagnosis)]
             if not region_data.empty:
                 row[diagnosis] = region_data.iloc[0]["Cliffs_Delta"]
             else:
                 row[diagnosis] = np.nan
         
         heatmap_data.append(row)
-    
+
     heatmap_df = pd.DataFrame(heatmap_data)
     heatmap_df.set_index("ROI_Name", inplace=True)
-    
-    if len(diagnoses) > 1 and len(heatmap_df.columns) > 0:
-        plt.figure(figsize=(12, 14))
+
+    # Remove columns that are all NaN (if any)
+    heatmap_df = heatmap_df.dropna(axis=1, how='all')
+
+    if len(heatmap_df.columns) > 0:
+        # Adjust figure size based on number of columns
+        fig_width = max(12, len(heatmap_df.columns) * 1.5)
+        plt.figure(figsize=(fig_width, 14))
+        
+        # Create a mask for NaN values to show them differently
+        mask = heatmap_df.isna()
+        
         sns.heatmap(heatmap_df, cmap="RdBu_r", center=0, annot=True, fmt=".2f", 
-                   cbar_kws={"label": "Cliff's Delta"})
-        plt.title(f"Top 30 Regions Effect Sizes vs {norm_diagnosis}")
+                cbar_kws={"label": "Cliff's Delta"}, mask=mask)
+        plt.title(f"Top 30 Regions Effect Sizes vs {norm_diagnosis} (Including Subgroups)")
+        plt.xticks(rotation=45, ha='right')  # Rotate x-axis labels for better readability
         plt.tight_layout()
-        plt.savefig(f"{save_dir}/figures/region_effect_heatmap_vs_{norm_diagnosis}.png", dpi=300, bbox_inches='tight')
+        plt.savefig(f"{save_dir}/figures/region_effect_heatmap_with_subgroups_vs_{norm_diagnosis}.png", dpi=300, bbox_inches='tight')
         plt.close()
         
         # Save heatmap data
-        # heatmap_df.to_csv(f"{save_dir}/top_regions_heatmap_data_vs_{norm_diagnosis}.csv")
+        heatmap_df.to_csv(f"{save_dir}/top_regions_heatmap_data_with_subgroups_vs_{norm_diagnosis}.csv")
+        
+        print(f"Heatmap created with {len(heatmap_df.columns)} diagnosis groups (including subgroups)")
+        print(f"Diagnosis groups in heatmap: {list(heatmap_df.columns)}")
+    else:
+        print("No data available for heatmap creation")
     
+     # Create filtered heatmap with only MDD, SCHZ, CTT-SCHZ, CTT-MDD
+    desired_diagnoses = ['MDD', 'SCHZ', 'CTT-SCHZ', 'CTT-MDD']
+
+    # Filter the heatmap dataframe to only include desired columns that exist
+    available_diagnoses = [diag for diag in desired_diagnoses if diag in heatmap_df.columns]
+
+    if len(available_diagnoses) > 0:
+        heatmap_filtered = heatmap_df[available_diagnoses].copy()
+        
+        # Check if we have any data (not all NaN)
+        if not heatmap_filtered.isna().all().all():
+            # Adjust figure size for the filtered version - make it wider
+            fig_width = max(12, len(available_diagnoses) * 3)  # Increased base width and multiplier
+            plt.figure(figsize=(fig_width, 16))  # Also increased height slightly
+            
+            # Create mask for NaN values
+            mask_filtered = heatmap_filtered.isna()
+            
+            # Create the filtered heatmap
+            sns.heatmap(heatmap_filtered, cmap="RdBu_r", center=0, annot=True, fmt=".2f",
+                    cbar_kws={"label": "Cliff's Delta"}, mask=mask_filtered,
+                    square=False, linewidths=0.5)  # Added square=False and linewidths for better appearance
+            plt.title(f"Top 30 Regions Effect Sizes vs {norm_diagnosis}\n(MDD, SCHZ, CTT-SCHZ, CTT-MDD)")
+            plt.xticks(rotation=45, ha='right')
+            plt.tight_layout()
+            plt.savefig(f"{save_dir}/figures/region_effect_heatmap_filtered_vs_{norm_diagnosis}.png", 
+                    dpi=300, bbox_inches='tight')
+            plt.close()
+            
+            # Save filtered heatmap data
+            heatmap_filtered.to_csv(f"{save_dir}/top_regions_heatmap_data_filtered_vs_{norm_diagnosis}.csv")
+            
+            print(f"Filtered heatmap created with diagnoses: {available_diagnoses}")
+        else:
+            print("No data available for filtered heatmap - all values are NaN")
+    else:
+        print(f"None of the desired diagnoses {desired_diagnoses} found in the data")
+        print(f"Available diagnoses in heatmap: {list(heatmap_df.columns)}")
     print(f"\nRegional analysis completed. Results saved to {save_dir}")
     print(f"Total effect sizes calculated: {len(effect_sizes_df)}")
     print(f"Average absolute Cliff's Delta: {effect_sizes_df['Abs_Cliffs_Delta'].mean():.3f}")
     print(f"Max absolute Cliff's Delta: {effect_sizes_df['Abs_Cliffs_Delta'].max():.3f}")
+    
+    if catatonia_subgroups:
+        print(f"\nCatatonia subgroups created: {list(catatonia_subgroups.keys())}")
     
     return effect_sizes_df

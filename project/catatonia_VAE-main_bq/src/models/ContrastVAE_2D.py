@@ -31,7 +31,6 @@ from models.base_model import (
 from utils.config_utils_model import Config_2D
 
 from module.data_processing_hc import (
-    combine_latent_spaces,
     process_latent_space_2D,
     save_model,
     save_model_metrics,
@@ -48,8 +47,6 @@ from utils.logging_utils import (
 from utils.plotting_utils import (
     latent_space_batch_plot,
     metrics_plot,
-    recon_images_plot,
-    plot_latent_space,
     plot_learning_curves,
     plot_bootstrap_metrics,
 )
