@@ -28,7 +28,7 @@ def flatten_array(arr):
     return arr.flatten() if hasattr(arr, 'flatten') else arr
 
 def normalize_and_scale_og(df: pd.DataFrame) -> pd.DataFrame:
-    # Normalizes the columns (patient volumes) by Min-Max Scaling and scales the rows (ROIs) with Z-transformation.
+    # erst ne log transformation, dann ne reihenweise Z-Standarisierung (aber immer nur die columns mit gleichem volume-type)
     #results in scaled input df
     #currently in use
 

@@ -1,5 +1,4 @@
-import sys
-sys.path.append("../src")
+
 import argparse
 import os
 from pathlib import Path
@@ -83,7 +82,7 @@ def main(args):
         # Extract other parameters
         latent_dim = int(config_df["LATENT_DIM"].iloc[0])
         norm_diagnosis = config_df["DIAGNOSES"].iloc[0] if "DIAGNOSES" in config_df.columns else args.norm_diagnosis
-        volume_type = config_df["VOLUME_TYPE"].iloc[0] if "VOLUME_TYPE" in config_df.columns else "Vgm"
+        volume_type = config_df["VOLUME_TYPE"].iloc[0] if "VOLUME_TYPE" in config_df.columns else ["Vgm", "Vwm", "Vcsf"]
         learning_rate = int(config_df["LEARNING_RATE"].iloc[0])
         kldiv_loss_weight = int(config_df["KLDIV_LOSS_WEIGHT"].iloc[0])
         recon_loss_weight = int(config_df["RECON_LOSS_WEIGHT"].iloc[0])

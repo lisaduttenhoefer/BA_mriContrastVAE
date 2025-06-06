@@ -1059,6 +1059,8 @@ def analyze_regional_deviations(
     region_avg_effects = effect_sizes_df.groupby("ROI_Name")["Abs_Cliffs_Delta"].mean().reset_index()
     top_regions_overall = region_avg_effects.sort_values("Abs_Cliffs_Delta", ascending=False).head(30)["ROI_Name"].values
 
+#---------------mit extended metadata subgroups-----------------------
+
     # Create matrix of effect sizes for these regions including subgroups
     heatmap_data = []
 
@@ -1110,7 +1112,9 @@ def analyze_regional_deviations(
         print(f"Diagnosis groups in heatmap: {list(heatmap_df.columns)}")
     else:
         print("No data available for heatmap creation")
-    
+
+    #---------------------heatmap condensed (only diagnosis)-----------------
+
      # Create filtered heatmap with only MDD, SCHZ, CTT-SCHZ, CTT-MDD
     desired_diagnoses = ['MDD', 'SCHZ', 'CTT-SCHZ', 'CTT-MDD']
 
@@ -1149,12 +1153,202 @@ def analyze_regional_deviations(
     else:
         print(f"None of the desired diagnoses {desired_diagnoses} found in the data")
         print(f"Available diagnoses in heatmap: {list(heatmap_df.columns)}")
-    print(f"\nRegional analysis completed. Results saved to {save_dir}")
-    print(f"Total effect sizes calculated: {len(effect_sizes_df)}")
-    print(f"Average absolute Cliff's Delta: {effect_sizes_df['Abs_Cliffs_Delta'].mean():.3f}")
-    print(f"Max absolute Cliff's Delta: {effect_sizes_df['Abs_Cliffs_Delta'].max():.3f}")
-    
-    if catatonia_subgroups:
-        print(f"\nCatatonia subgroups created: {list(catatonia_subgroups.keys())}")
-    
+
+    # Add this code after the filtered heatmap section in your analyze_regional_deviations function
+
+        #---------------------heatmap with dataset split-----------------
+        # Ersetzen Sie den gesamten Abschnitt "heatmap with dataset split" mit diesem Code:
+
+    #---------------------Dataset-Split Heatmap (Fixed Version)-----------------
+
+    print("Creating dataset-split heatmap...")
+
+    # Prüfen ob Dataset Spalte existiert
+    if 'Dataset' not in results_df.columns:
+        print("No 'Dataset' column found - skipping dataset-split heatmap")
+    else:
+        # Dataset-Kategorien definieren (flexibel für verschiedene Schreibweisen)
+        available_datasets = results_df['Dataset'].unique()
+        print(f"Available datasets: {available_datasets}")
+        
+        dataset_categories = {
+            'whiteCAT': [d for d in available_datasets if 'whitecat' in str(d).lower() or 'white_cat' in str(d).lower()],
+            'NSS': [d for d in available_datasets if 'nss' in str(d).lower()],
+            'others': [d for d in available_datasets if not any(x in str(d).lower() for x in ['whitecat', 'white_cat', 'nss'])]
+        }
+        
+        print(f"Dataset categories: {dataset_categories}")
+        
+        # Effect sizes für Dataset-Splits berechnen
+        dataset_split_effects = []
+        
+        # Für jede Hauptdiagnose
+        main_diagnoses = ['SCHZ', 'MDD', 'CTT-SCHZ', 'CTT-MDD']
+        
+        for diagnosis in main_diagnoses:
+            if diagnosis == norm_diagnosis:
+                continue
+                
+            # Alle Patienten dieser Diagnose
+            dx_data = results_df[results_df["Diagnosis"] == diagnosis]
+            if dx_data.empty:
+                print(f"No data found for {diagnosis}")
+                continue
+                
+            print(f"Processing {diagnosis} (total n={len(dx_data)})")
+            
+            # Für jede Dataset-Kategorie
+            for category_name, dataset_list in dataset_categories.items():
+                if not dataset_list:
+                    continue
+                    
+                # Daten für diese Kategorie filtern
+                category_data = dx_data[dx_data['Dataset'].isin(dataset_list)]
+                
+                if category_data.empty:
+                    print(f"  No {category_name} data for {diagnosis}")
+                    continue
+                    
+                print(f"  {diagnosis}-{category_name}: n={len(category_data)}")
+                
+                # Effect sizes für alle Regionen berechnen
+                for i, region_col in enumerate(region_cols):
+                    roi_name = roi_names[i] if i < len(roi_names) else f"Region_{i+1}"
+                    
+                    category_values = category_data[region_col].values
+                    norm_values = norm_data[region_col].values
+                    
+                    if len(category_values) == 0 or len(norm_values) == 0:
+                        continue
+                    
+                    # Cliff's Delta berechnen
+                    cliff_delta = calculate_cliffs_delta(category_values, norm_values)
+                    
+                    dataset_split_effects.append({
+                        'Diagnosis_Dataset': f"{diagnosis}-{category_name}",
+                        'Diagnosis': diagnosis,
+                        'Dataset_Category': category_name,
+                        'ROI_Name': roi_name,
+                        'Cliffs_Delta': cliff_delta,
+                        'N_Subjects': len(category_values)
+                    })
+        
+        if dataset_split_effects:
+            # DataFrame erstellen
+            dataset_effects_df = pd.DataFrame(dataset_split_effects)
+            
+            # Pivot table für Heatmap erstellen
+            heatmap_dataset = dataset_effects_df.pivot(
+                index='ROI_Name', 
+                columns='Diagnosis_Dataset', 
+                values='Cliffs_Delta'
+            )
+            
+            # Nur top Regionen verwenden
+            heatmap_dataset_top = heatmap_dataset[heatmap_dataset.index.isin(top_regions_overall)]
+            
+            # Spalten in gewünschter Reihenfolge sortieren
+            column_order = []
+            for diagnosis in main_diagnoses:
+                if diagnosis == norm_diagnosis:
+                    continue
+                for category in ['whiteCAT', 'NSS', 'others']:
+                    col_name = f"{diagnosis}-{category}"
+                    if col_name in heatmap_dataset_top.columns:
+                        column_order.append(col_name)
+            
+            heatmap_dataset_ordered = heatmap_dataset_top[column_order]
+            
+            # Heatmap erstellen
+            if not heatmap_dataset_ordered.empty and len(heatmap_dataset_ordered.columns) > 0:
+                fig_width = max(16, len(heatmap_dataset_ordered.columns) * 2.5)
+                fig_height = max(14, len(heatmap_dataset_ordered) * 0.4)
+                
+                fig, ax = plt.subplots(figsize=(fig_width, fig_height))
+                
+                # NaN Maske
+                mask = heatmap_dataset_ordered.isna()
+                
+                # Heatmap plotten
+                sns.heatmap(heatmap_dataset_ordered, 
+                        cmap="RdBu_r", 
+                        center=0, 
+                        annot=True, 
+                        fmt=".2f", 
+                        mask=mask,
+                        cbar_kws={"label": "Cliff's Delta"}, 
+                        linewidths=0.5,
+                        ax=ax)
+                
+                # Titel und Labels
+                ax.set_title(f"Regional Effect Sizes vs {norm_diagnosis}\n(Split by Dataset: whiteCAT, NSS, others)", 
+                            fontsize=16, pad=20)
+                ax.set_xlabel("Diagnosis-Dataset", fontsize=12)
+                ax.set_ylabel("Brain Region", fontsize=12)
+                
+                # X-Achse Labels rotieren
+                ax.set_xticklabels(ax.get_xticklabels(), rotation=45, ha='right')
+                
+                # Vertikale Linien zwischen Diagnosen hinzufügen
+                col_positions = []
+                current_pos = 0
+                diagnosis_positions = {}
+                
+                for diagnosis in main_diagnoses:
+                    if diagnosis == norm_diagnosis:
+                        continue
+                        
+                    diagnosis_cols = [col for col in column_order if col.startswith(f"{diagnosis}-")]
+                    if diagnosis_cols:
+                        diagnosis_positions[diagnosis] = current_pos + len(diagnosis_cols)/2
+                        current_pos += len(diagnosis_cols)
+                        col_positions.append(current_pos)
+                
+                # Trennlinien zeichnen (außer nach der letzten Gruppe)
+                for pos in col_positions[:-1]:
+                    ax.axvline(x=pos, color='black', linewidth=2, alpha=0.8)
+                
+                plt.tight_layout()
+                
+                # Speichern
+                plt.savefig(f"{save_dir}/figures/region_effect_heatmap_dataset_split_vs_{norm_diagnosis}.png",
+                        dpi=300, bbox_inches='tight')
+                plt.close()
+                
+                # Daten speichern
+                heatmap_dataset_ordered.to_csv(f"{save_dir}/top_regions_heatmap_dataset_split_vs_{norm_diagnosis}.csv")
+                
+                # Zusammenfassung ausgeben
+                print(f"\nDataset-split heatmap created successfully!")
+                print(f"Shape: {heatmap_dataset_ordered.shape}")
+                print(f"Columns: {list(heatmap_dataset_ordered.columns)}")
+                
+                # Datenübersicht pro Spalte
+                print("\nData availability per column:")
+                for col in heatmap_dataset_ordered.columns:
+                    non_nan = heatmap_dataset_ordered[col].notna().sum()
+                    total = len(heatmap_dataset_ordered)
+                    pct = (non_nan/total*100) if total > 0 else 0
+                    print(f"  {col}: {non_nan}/{total} regions ({pct:.1f}%)")
+                    
+                # Sample size Übersicht
+                print("\nSample sizes per group:")
+                sample_sizes = dataset_effects_df.groupby('Diagnosis_Dataset')['N_Subjects'].first()
+                for group, n in sample_sizes.items():
+                    print(f"  {group}: n={n}")
+                    
+            else:
+                print("No data available for dataset-split heatmap")
+                
+        else:
+            print("No effect sizes calculated for dataset splits")
+            
+        print(f"\nRegional analysis completed. Results saved to {save_dir}")
+        print(f"Total effect sizes calculated: {len(effect_sizes_df)}")
+        print(f"Average absolute Cliff's Delta: {effect_sizes_df['Abs_Cliffs_Delta'].mean():.3f}")
+        print(f"Max absolute Cliff's Delta: {effect_sizes_df['Abs_Cliffs_Delta'].max():.3f}")
+        
+        if catatonia_subgroups:
+            print(f"\nCatatonia subgroups created: {list(catatonia_subgroups.keys())}")
+        
     return effect_sizes_df
