@@ -293,6 +293,10 @@ def main(args):
                                 'NSS_Motor':10, #minimum = 0, maximum = ?
                                 'NSS_Total':25} #minimum = 0, maximum = 19 ??geht bei uns höher?
         )
+
+        # Save heatmap data
+        regional_results.to_csv(f"{save_dir}/effect_sizes_{norm_diagnosis}.csv")
+        
         log_and_print_test(f"Regional deviation analysis complete. Results saved to {save_dir}/regional_effect_sizes.csv")
     else:
         log_and_print_test("Warning: Could not analyze regional deviations due to missing HDF5 file.")

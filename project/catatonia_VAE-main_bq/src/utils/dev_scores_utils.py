@@ -1342,6 +1342,9 @@ def analyze_regional_deviations(
                 
         else:
             print("No effect sizes calculated for dataset splits")
+
+        # Daten speichern
+        effect_sizes_df.to_csv(f"{save_dir}/effect_sizes_{norm_diagnosis}.csv")
             
         print(f"\nRegional analysis completed. Results saved to {save_dir}")
         print(f"Total effect sizes calculated: {len(effect_sizes_df)}")

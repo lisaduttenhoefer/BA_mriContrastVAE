@@ -237,7 +237,7 @@ def load_mri_data_2D(
     covars: List[str] = [],
     hdf5: bool = True,
     train_or_test: str = "train",
-    save: bool = False,
+    save: bool = None,
     volume_type = None, #adaptable
     valid_volume_types: List[str] = ["Vgm", "Vwm", "Vcsf"],
 ) -> Tuple:
@@ -380,7 +380,7 @@ def load_mri_data_2D(
         # Save processed data if needed
         if save:
             volume_suffix = "_".join(atlas_volume_types)
-            save_path = f"/workspace/project/catatonia_VAE-main_bq/data/proc_extracted_xml_data/Proc_{atlas}_{volume_suffix}_{train_or_test}.csv"
+            save_path = f"/workspace/project/catatonia_VAE-main_bq/data/proc_extracted_xml_data/Proc_{atlas}_{volume_suffix}_uiui.csv"
             data.to_csv(save_path)
         
         # Process each subject for this atlas

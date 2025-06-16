@@ -48,38 +48,74 @@ fi
 # # Vgm, Vwm, Vcsf	neuromorphometrics cobra 	HC
 # python /workspace/project/catatonia_VAE-main_bq/src/run_ConVAE_2D_train_adapt.py --atlas_name neuromorphometrics cobra --volume_type Vgm Vwm Vcsf
 
-# Vgm	neuromorphometrics	SCHZ
-python /workspace/project/catatonia_VAE-main_bq/src/run_ConVAE_2D_train_adapt.py --atlas_name neuromorphometrics --volume_type Vgm --norm_diagnosis "SCHZ"
+# # Vgm	neuromorphometrics	SCHZ
+# python /workspace/project/catatonia_VAE-main_bq/src/run_ConVAE_2D_train_adapt.py --atlas_name neuromorphometrics --volume_type Vgm --norm_diagnosis "SCHZ"
 
-# Vgm, Vwm, Vcsf	neuromorphometrics	SCHZ
-python /workspace/project/catatonia_VAE-main_bq/src/run_ConVAE_2D_train_adapt.py --atlas_name neuromorphometrics --volume_type Vgm Vwm Vcsf --norm_diagnosis "SCHZ"
+# # Vgm, Vwm, Vcsf	neuromorphometrics	SCHZ
+# python /workspace/project/catatonia_VAE-main_bq/src/run_ConVAE_2D_train_adapt.py --atlas_name neuromorphometrics --volume_type Vgm Vwm Vcsf --norm_diagnosis "SCHZ"
 
-# Vgm	cobra	SCHZ
-python /workspace/project/catatonia_VAE-main_bq/src/run_ConVAE_2D_train_adapt.py --atlas_name cobra --volume_type Vgm --norm_diagnosis "SCHZ"
+# # Vgm	cobra	SCHZ
+# python /workspace/project/catatonia_VAE-main_bq/src/run_ConVAE_2D_train_adapt.py --atlas_name cobra --volume_type Vgm --norm_diagnosis "SCHZ"
 
-# Vgm, Vwm, Vcsf	cobra	SCHZ
-python /workspace/project/catatonia_VAE-main_bq/src/run_ConVAE_2D_train_adapt.py --atlas_name cobra --volume_type Vgm Vwm Vcsf --norm_diagnosis "SCHZ"
+# # Vgm, Vwm, Vcsf	cobra	SCHZ
+# python /workspace/project/catatonia_VAE-main_bq/src/run_ConVAE_2D_train_adapt.py --atlas_name cobra --volume_type Vgm Vwm Vcsf --norm_diagnosis "SCHZ"
 
-# Vgm	lpba40	SCHZ
-python /workspace/project/catatonia_VAE-main_bq/src/run_ConVAE_2D_train_adapt.py --atlas_name lpba40 --volume_type Vgm --norm_diagnosis "SCHZ"
+# # Vgm	lpba40	SCHZ
+# python /workspace/project/catatonia_VAE-main_bq/src/run_ConVAE_2D_train_adapt.py --atlas_name lpba40 --volume_type Vgm --norm_diagnosis "SCHZ"
 
-# Vgm, Vwm, Vcsf	lpba40	SCHZ
-python /workspace/project/catatonia_VAE-main_bq/src/run_ConVAE_2D_train_adapt.py --atlas_name lpba40 --volume_type Vgm Vwm Vcsf --norm_diagnosis "SCHZ"
+# # Vgm, Vwm, Vcsf	lpba40	SCHZ
+# python /workspace/project/catatonia_VAE-main_bq/src/run_ConVAE_2D_train_adapt.py --atlas_name lpba40 --volume_type Vgm Vwm Vcsf --norm_diagnosis "SCHZ"
 
-# Vgm	all	SCHZ
-python /workspace/project/catatonia_VAE-main_bq/src/run_ConVAE_2D_train_adapt.py --atlas_name all --volume_type Vgm --norm_diagnosis "SCHZ"
+# # Vgm	all	SCHZ
+# python /workspace/project/catatonia_VAE-main_bq/src/run_ConVAE_2D_train_adapt.py --atlas_name all --volume_type Vgm --norm_diagnosis "SCHZ"
 
-# Vgm, Vwm, Vcsf	all	SCHZ
-python /workspace/project/catatonia_VAE-main_bq/src/run_ConVAE_2D_train_adapt.py --atlas_name all --volume_type Vgm Vwm Vcsf --norm_diagnosis "SCHZ"
+# # Vgm, Vwm, Vcsf	all	SCHZ
+# python /workspace/project/catatonia_VAE-main_bq/src/run_ConVAE_2D_train_adapt.py --atlas_name all --volume_type Vgm Vwm Vcsf --norm_diagnosis "SCHZ"
 
-# Vgm	neuromorphometrics cobra lpba40	SCHZ
-python /workspace/project/catatonia_VAE-main_bq/src/run_ConVAE_2D_train_adapt.py --atlas_name neuromorphometrics cobra lpba40 --volume_type Vgm --norm_diagnosis "SCHZ"
+# # Vgm	neuromorphometrics cobra lpba40	SCHZ
+# python /workspace/project/catatonia_VAE-main_bq/src/run_ConVAE_2D_train_adapt.py --atlas_name neuromorphometrics cobra lpba40 --volume_type Vgm --norm_diagnosis "SCHZ"
 
-# Vgm, Vwm, Vcsf	neuromorphometrics cobra lpba40	SCHZ
-python /workspace/project/catatonia_VAE-main_bq/src/run_ConVAE_2D_train_adapt.py --atlas_name neuromorphometrics cobra lpba40 --volume_type Vgm Vwm Vcsf --norm_diagnosis "SCHZ"
+# # Vgm, Vwm, Vcsf	neuromorphometrics cobra lpba40	SCHZ
+# python /workspace/project/catatonia_VAE-main_bq/src/run_ConVAE_2D_train_adapt.py --atlas_name neuromorphometrics cobra lpba40 --volume_type Vgm Vwm Vcsf --norm_diagnosis "SCHZ"
 
-# Vgm	neuromorphometrics cobra 	SCHZ
-python /workspace/project/catatonia_VAE-main_bq/src/run_ConVAE_2D_train_adapt.py --atlas_name neuromorphometrics cobra --volume_type Vgm --norm_diagnosis "SCHZ"
+# # Vgm	neuromorphometrics cobra 	SCHZ
+# python /workspace/project/catatonia_VAE-main_bq/src/run_ConVAE_2D_train_adapt.py --atlas_name neuromorphometrics cobra --volume_type Vgm --norm_diagnosis "SCHZ"
 
-# Vgm, Vwm, Vcsf	neuromorphometrics cobra 	SCHZ
-python /workspace/project/catatonia_VAE-main_bq/src/run_ConVAE_2D_train_adapt.py --atlas_name neuromorphometrics cobra --volume_type Vgm Vwm Vcsf --norm_diagnosis "SCHZ"
+# # Vgm, Vwm, Vcsf	neuromorphometrics cobra 	SCHZ
+# python /workspace/project/catatonia_VAE-main_bq/src/run_ConVAE_2D_train_adapt.py --atlas_name neuromorphometrics cobra --volume_type Vgm Vwm Vcsf --norm_diagnosis "SCHZ"
+
+# Vgm	neuromorphometrics	MDD
+python /workspace/project/catatonia_VAE-main_bq/src/run_ConVAE_2D_train_adapt.py --atlas_name neuromorphometrics --volume_type Vgm --norm_diagnosis "MDD"
+
+# Vgm, Vwm, Vcsf	neuromorphometrics	MDD
+python /workspace/project/catatonia_VAE-main_bq/src/run_ConVAE_2D_train_adapt.py --atlas_name neuromorphometrics --volume_type Vgm Vwm Vcsf --norm_diagnosis "MDD"
+
+# Vgm	cobra	MDD
+python /workspace/project/catatonia_VAE-main_bq/src/run_ConVAE_2D_train_adapt.py --atlas_name cobra --volume_type Vgm --norm_diagnosis "MDD"
+
+# Vgm, Vwm, Vcsf	cobra	MDD
+python /workspace/project/catatonia_VAE-main_bq/src/run_ConVAE_2D_train_adapt.py --atlas_name cobra --volume_type Vgm Vwm Vcsf --norm_diagnosis "MDD"
+
+# Vgm	lpba40	MDD
+python /workspace/project/catatonia_VAE-main_bq/src/run_ConVAE_2D_train_adapt.py --atlas_name lpba40 --volume_type Vgm --norm_diagnosis "MDD"
+
+# Vgm, Vwm, Vcsf	lpba40	MDD
+python /workspace/project/catatonia_VAE-main_bq/src/run_ConVAE_2D_train_adapt.py --atlas_name lpba40 --volume_type Vgm Vwm Vcsf --norm_diagnosis "MDD"
+
+# Vgm	all	MDD
+python /workspace/project/catatonia_VAE-main_bq/src/run_ConVAE_2D_train_adapt.py --atlas_name all --volume_type Vgm --norm_diagnosis "MDD"
+
+# Vgm, Vwm, Vcsf	all	MDD
+python /workspace/project/catatonia_VAE-main_bq/src/run_ConVAE_2D_train_adapt.py --atlas_name all --volume_type Vgm Vwm Vcsf --norm_diagnosis "MDD"
+
+# Vgm	neuromorphometrics cobra lpba40	MDD
+python /workspace/project/catatonia_VAE-main_bq/src/run_ConVAE_2D_train_adapt.py --atlas_name neuromorphometrics cobra lpba40 --volume_type Vgm --norm_diagnosis "MDD"
+
+# Vgm, Vwm, Vcsf	neuromorphometrics cobra lpba40	MDD
+python /workspace/project/catatonia_VAE-main_bq/src/run_ConVAE_2D_train_adapt.py --atlas_name neuromorphometrics cobra lpba40 --volume_type Vgm Vwm Vcsf --norm_diagnosis "MDD"
+
+# Vgm	neuromorphometrics cobra 	MDD
+python /workspace/project/catatonia_VAE-main_bq/src/run_ConVAE_2D_train_adapt.py --atlas_name neuromorphometrics cobra --volume_type Vgm --norm_diagnosis "MDD"
+
+# Vgm, Vwm, Vcsf	neuromorphometrics cobra 	MDD
+python /workspace/project/catatonia_VAE-main_bq/src/run_ConVAE_2D_train_adapt.py --atlas_name neuromorphometrics cobra --volume_type Vgm Vwm Vcsf --norm_diagnosis "MDD"
