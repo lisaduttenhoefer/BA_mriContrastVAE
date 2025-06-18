@@ -1,0 +1,23 @@
+Stark korrelierende Hirnregionen:
+
+reconstruction_error                                reconstruction_error                                      1.000000
+deviation_score                                     deviation_score_zscore                                    0.999807
+lpba40_lPut_Vgm                                     neuromorphometrics_Left Putamen_Vgm                       0.979194
+neuromorphometrics_Right Putamen_Vgm                lpba40_rPut_Vgm                                           0.975963
+lpba40_lCau_Vgm                                     neuromorphometrics_Left Caudate_Vgm                       0.974321
+lpba40_rCau_Vgm                                     neuromorphometrics_Right Caudate_Vgm                      0.969263
+lpba40_bCBeL_Vgm                                    neuromorphometrics_Right Cerebellum Exterior_Vgm          0.955085
+lpba40_lPrcG_Vgm                                    neuromorphometrics_Left PrG precentral gyrus_Vgm          0.948371
+kl_divergence_std                                   kl_divergence                                             0.933820
+lpba40_lMidTemG_Vgm                                 neuromorphometrics_Left MTG middle temporal gyrus_Vgm     0.931790
+lpba40_rPrcG_Vgm                                    neuromorphometrics_Right PrG precentral gyrus_Vgm         0.927864
+lpba40_rMidTemG_Vgm                                 neuromorphometrics_Right MTG middle temporal gyrus_Vgm    0.925228
+lpba40_lAngG_Vgm                                    neuromorphometrics_Left AnG angular gyrus_Vgm             0.924484
+lpba40_rFusG_Vgm                                    neuromorphometrics_Right FuG fusiform gyrus_Vgm           0.924484
+neuromorphometrics_Right Pallidum_Vgm               cobra_rGloPal_Vgm                                         0.921761
+lpba40_bBst_Vgm                                     neuromorphometrics_Brain Stem_Vgm                         0.919572
+neuromorphometrics_Right PoG postcentral gyrus_Vgm  lpba40_rPoCG_Vgm                                          0.919028
+neuromorphometrics_Right AnG angular gyrus_Vgm      lpba40_rAngG_Vgm                                          0.914000
+suit_Left CrusI_Vgm                                 cobra_lSupPostCerebCI_Vgm                                 0.909886
+neuromorphometrics_Left FuG fusiform gyrus_Vgm      lpba40_lFusG_Vgm                                          0.906877
+dtype: float64
