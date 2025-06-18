@@ -32,7 +32,8 @@ from utils.dev_scores_utils import (
     analyze_regional_deviations,
     extract_roi_names,
     save_latent_visualizations,
-    visualize_embeddings_multiple
+    visualize_embeddings_multiple,
+    run_correlation_analysis
 )
 
 def main(args):
@@ -222,7 +223,12 @@ def main(args):
         annotations_df=annotations_dev,
         device=device
     )
-    
+    correlation_results, merged_data = run_correlation_analysis(
+        results_df=results_df,
+        save_dir=save_dir,
+        correction_method='fdr_bh',  # oder 'bonferroni', 'holm', etc.
+        alpha=0.05
+    )
     # Map ROI names to region columns if we have them
     if roi_names is not None:
         region_cols = [col for col in results_df.columns if col.startswith("region_")]

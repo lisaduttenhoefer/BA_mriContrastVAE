@@ -17,6 +17,9 @@ from scipy import stats as scipy_stats
 from sklearn.metrics import roc_curve, auc, precision_recall_curve
 import umap
 from sklearn.preprocessing import StandardScaler
+from scipy.stats import spearmanr, pearsonr
+import warnings
+warnings.filterwarnings('ignore')
 
 #helper function 1 for dev_score plotting
 # Creates a summary table showing statistics for each diagnosis group colored by the color column
@@ -1355,3 +1358,539 @@ def analyze_regional_deviations(
             print(f"\nCatatonia subgroups created: {list(catatonia_subgroups.keys())}")
         
     return effect_sizes_df
+
+######################################################## CORRELATION ANALYSIS ################################################################
+
+from statsmodels.stats.multitest import multipletests
+
+
+def analyze_score_correlations_with_corrections(results_df, metadata_df, save_dir, 
+                                               diagnoses_to_include=None,
+                                               correction_method='fdr_bh',
+                                               alpha=0.1):
+    """
+    Analysiert Korrelationen mit verschiedenen Korrekturoptionen
+    
+    Parameters:
+    -----------
+    results_df : DataFrame
+        DataFrame mit Deviation Scores und Diagnosen
+    metadata_df : DataFrame  
+        DataFrame mit klinischen Scores
+    save_dir : str
+        Pfad zum Speichern der Ergebnisse
+    diagnoses_to_include : list, optional
+        Liste der zu inkludierenden Diagnosen
+    correction_method : str
+        Methode für multiple testing correction:
+        - 'bonferroni': Bonferroni correction
+        - 'fdr_bh': Benjamini-Hochberg FDR
+        - 'fdr_by': Benjamini-Yekutieli FDR
+        - 'holm': Holm-Sidak method
+        - None: keine Korrektur
+    alpha : float
+        Signifikanzlevel (default: 0.05)
+    """
+    
+    # Merge der DataFrames
+    merged_data = pd.merge(results_df, metadata_df, on='Filename', how='inner')
+    print(f"Merged data shape: {merged_data.shape}")
+    
+    # Bereinigung der Spaltennamen nach dem Merge
+    merged_data = merged_data.rename(columns={'Age_x': 'Age', 'Sex_x': 'Sex', 'Dataset_x': 'Dataset'})
+    
+    # Filtere nach gewünschten Diagnosen
+    if diagnoses_to_include:
+        merged_data = merged_data[merged_data['Diagnosis_x'].isin(diagnoses_to_include)]
+        print(f"Filtered to diagnoses {diagnoses_to_include}. New shape: {merged_data.shape}")
+    
+    # Definiere die Score-Spalten
+    score_columns = ['GAF_Score', 'PANSS_Positive', 'PANSS_Negative', 
+                     'PANSS_General', 'PANSS_Total', 'BPRS_Total', 
+                     'NCRS_Motor', 'NCRS_Affective', 'NCRS_Behavioral', 
+                     'NCRS_Total', 'NSS_Motor', 'NSS_Total']
+    
+    # Filtere nur vorhandene Score-Spalten
+    available_scores = [col for col in score_columns if col in merged_data.columns]
+    print(f"Available score columns: {available_scores}")
+    
+    deviation_metric = 'deviation_score'
+    
+    # Erstelle Ausgabeverzeichnis
+    import os
+    os.makedirs(f"{save_dir}/figures/correlations", exist_ok=True)
+    
+    # 1. BERECHNE ALLE KORRELATIONEN
+    correlation_results = calculate_correlations_with_corrections(
+        merged_data, available_scores, deviation_metric, correction_method, alpha
+    )
+    
+    # 2. VISUALISIERUNGEN
+    plot_correlation_heatmap_with_corrections(
+        correlation_results, available_scores, deviation_metric, save_dir, correction_method
+    )
+    
+    # 3. DIAGNOSE-SPEZIFISCHE KORRELATIONEN
+    if 'Diagnosis_x' in merged_data.columns:
+        diagnosis_results = analyze_diagnosis_correlations_with_corrections(
+            merged_data, available_scores, deviation_metric, save_dir, correction_method, alpha
+        )
+    
+    # 4. ZUSAMMENFASSUNGSTABELLEN
+    create_corrected_summary_tables(correlation_results, save_dir, correction_method)
+    
+    return correlation_results, merged_data
+
+def calculate_correlations_with_corrections(merged_data, score_columns, deviation_metric, 
+                                          correction_method, alpha):
+    """Berechnet Korrelationen mit verschiedenen Korrekturen"""
+    
+    correlations = {}
+    all_p_values = []
+    all_tests = []
+    
+    print(f"\n=== Analyzing correlations for {deviation_metric} ===")
+    
+    # Sammle alle p-Werte für multiple testing correction
+    for score in score_columns:
+        valid_data = merged_data[[deviation_metric, score]].dropna()
+        
+        if len(valid_data) < 10:
+            print(f"Insufficient data for {score} (n={len(valid_data)})")
+            continue
+            
+        # Berechne Korrelationen
+        pearson_r, pearson_p = pearsonr(valid_data[deviation_metric], valid_data[score])
+        spearman_r, spearman_p = spearmanr(valid_data[deviation_metric], valid_data[score])
+        
+        correlations[score] = {
+            'n': len(valid_data),
+            'pearson_r': pearson_r,
+            'pearson_p': pearson_p,
+            'spearman_r': spearman_r,
+            'spearman_p': spearman_p,
+            'valid_data': valid_data
+        }
+        
+        # Sammle p-Werte für Korrektur
+        all_p_values.extend([pearson_p, spearman_p])
+        all_tests.extend([(score, 'pearson'), (score, 'spearman')])
+    
+    # Multiple testing correction
+    if correction_method and len(all_p_values) > 0:
+        print(f"\nApplying {correction_method} correction to {len(all_p_values)} tests...")
+        
+        rejected, corrected_p_values, alpha_sidak, alpha_bonf = multipletests(
+            all_p_values, alpha=alpha, method=correction_method
+        )
+        
+        # Füge korrigierte p-Werte zu den Ergebnissen hinzu
+        for i, (score, test_type) in enumerate(all_tests):
+            if score in correlations:
+                correlations[score][f'{test_type}_p_corrected'] = corrected_p_values[i]
+                correlations[score][f'{test_type}_significant_corrected'] = rejected[i]
+        
+        print(f"Correction applied. Effective alpha: {alpha_bonf:.6f}")
+    
+    # Ausgabe der Ergebnisse
+    for score, results in correlations.items():
+        print(f"\n{score}:")
+        print(f"  n={results['n']}")
+        print(f"  Pearson: r={results['pearson_r']:.3f}, p={results['pearson_p']:.3f}", end="")
+        if correction_method:
+            print(f", p_corr={results['pearson_p_corrected']:.3f} {'*' if results['pearson_significant_corrected'] else ''}")
+        else:
+            print("")
+        
+        print(f"  Spearman: r={results['spearman_r']:.3f}, p={results['spearman_p']:.3f}", end="")
+        if correction_method:
+            print(f", p_corr={results['spearman_p_corrected']:.3f} {'*' if results['spearman_significant_corrected'] else ''}")
+        else:
+            print("")
+    
+    return {deviation_metric: correlations}
+
+def plot_correlation_heatmap_with_corrections(correlation_results, score_columns, 
+                                            deviation_metric, save_dir, correction_method):
+    """Erstellt Heatmaps mit und ohne Korrektur"""
+    
+    def create_correlation_matrices(use_corrected=False):
+        pearson_values = []
+        spearman_values = []
+        pearson_p_values = []
+        spearman_p_values = []
+        
+        p_suffix = '_corrected' if use_corrected else ''
+        
+        for score in score_columns:
+            if score in correlation_results[deviation_metric]:
+                pearson_values.append(correlation_results[deviation_metric][score]['pearson_r'])
+                spearman_values.append(correlation_results[deviation_metric][score]['spearman_r'])
+                
+                pearson_p_key = f'pearson_p{p_suffix}'
+                spearman_p_key = f'spearman_p{p_suffix}'
+                
+                pearson_p_values.append(correlation_results[deviation_metric][score].get(pearson_p_key, 
+                                       correlation_results[deviation_metric][score]['pearson_p']))
+                spearman_p_values.append(correlation_results[deviation_metric][score].get(spearman_p_key,
+                                        correlation_results[deviation_metric][score]['spearman_p']))
+            else:
+                pearson_values.append(np.nan)
+                spearman_values.append(np.nan)
+                pearson_p_values.append(np.nan)
+                spearman_p_values.append(np.nan)
+        
+        return (np.array(pearson_values).reshape(1, -1),
+                np.array(spearman_values).reshape(1, -1),
+                np.array(pearson_p_values).reshape(1, -1),
+                np.array(spearman_p_values).reshape(1, -1))
+    
+    def create_annotations(corr_matrix, p_matrix):
+        annotations = []
+        for i in range(corr_matrix.shape[0]):
+            row_annotations = []
+            for j in range(corr_matrix.shape[1]):
+                if np.isnan(corr_matrix[i, j]):
+                    row_annotations.append('')
+                else:
+                    corr_val = corr_matrix[i, j]
+                    p_val = p_matrix[i, j]
+                    
+                    if p_val < 0.001:
+                        stars = '***'
+                    elif p_val < 0.01:
+                        stars = '**'
+                    elif p_val < 0.05:
+                        stars = '*'
+                    else:
+                        stars = ''
+                    
+                    annotation = f'{corr_val:.3f}{stars}'
+                    row_annotations.append(annotation)
+            annotations.append(row_annotations)
+        return annotations
+    
+    # Plot ohne Korrektur
+    pearson_matrix, spearman_matrix, pearson_p_matrix, spearman_p_matrix = create_correlation_matrices(False)
+    
+    # Pearson ohne Korrektur
+    plt.figure(figsize=(14, 4))
+    mask = np.isnan(pearson_matrix)
+    pearson_annotations = create_annotations(pearson_matrix, pearson_p_matrix)
+    
+    sns.heatmap(pearson_matrix, 
+                xticklabels=score_columns,
+                yticklabels=[deviation_metric.replace('_', ' ').title()],
+                annot=pearson_annotations,
+                fmt='',
+                cmap='RdBu_r', 
+                center=0,
+                mask=mask,
+                square=False,
+                cbar_kws={'label': 'Pearson Correlation Coefficient'})
+    
+    plt.title('Pearson Correlations (Uncorrected)\n(* p<0.05, ** p<0.01, *** p<0.001)', fontsize=14)
+    plt.xlabel('Clinical Scores', fontsize=12)
+    plt.xticks(rotation=45, ha='right')
+    plt.tight_layout()
+    plt.savefig(f"{save_dir}/figures/correlations/pearson_correlation_uncorrected.png", dpi=300, bbox_inches='tight')
+    plt.close()
+    
+    # Plot mit Korrektur (falls verfügbar)
+    if correction_method:
+        pearson_matrix_corr, spearman_matrix_corr, pearson_p_matrix_corr, spearman_p_matrix_corr = create_correlation_matrices(True)
+        
+        # Pearson mit Korrektur
+        plt.figure(figsize=(14, 4))
+        mask = np.isnan(pearson_matrix_corr)
+        pearson_annotations_corr = create_annotations(pearson_matrix_corr, pearson_p_matrix_corr)
+        
+        sns.heatmap(pearson_matrix_corr, 
+                    xticklabels=score_columns,
+                    yticklabels=[deviation_metric.replace('_', ' ').title()],
+                    annot=pearson_annotations_corr,
+                    fmt='',
+                    cmap='RdBu_r', 
+                    center=0,
+                    mask=mask,
+                    square=False,
+                    cbar_kws={'label': 'Pearson Correlation Coefficient'})
+        
+        plt.title(f'Pearson Correlations ({correction_method.upper()} Corrected)\n(* p<0.05, ** p<0.01, *** p<0.001)', fontsize=14)
+        plt.xlabel('Clinical Scores', fontsize=12)
+        plt.xticks(rotation=45, ha='right')
+        plt.tight_layout()
+        plt.savefig(f"{save_dir}/figures/correlations/pearson_correlation_{correction_method}_corrected.png", dpi=300, bbox_inches='tight')
+        plt.close()
+
+def analyze_diagnosis_correlations_with_corrections(merged_data, score_columns, deviation_metric, 
+                                                  save_dir, correction_method, alpha):
+    """Analysiert Korrelationen nach Diagnosen mit Korrekturen"""
+    
+    # Filtere HC aus
+    diagnoses = [d for d in merged_data['Diagnosis_x'].unique() if d != 'HC']
+    
+    diagnosis_results = {}
+    
+    for diagnosis in diagnoses:
+        diag_data = merged_data[merged_data['Diagnosis_x'] == diagnosis]
+        
+        if len(diag_data) < 10:
+            continue
+        
+        print(f"\n=== Analyzing correlations for {diagnosis} (n={len(diag_data)}) ===")
+        
+        # Berechne Korrelationen für diese Diagnose
+        correlations = {}
+        all_p_values = []
+        all_tests = []
+        
+        for score in score_columns:
+            if score not in diag_data.columns:
+                continue
+                
+            valid_data = diag_data[[deviation_metric, score]].dropna()
+            
+            if len(valid_data) < 5:
+                continue
+                
+            pearson_r, pearson_p = pearsonr(valid_data[deviation_metric], valid_data[score])
+            spearman_r, spearman_p = spearmanr(valid_data[deviation_metric], valid_data[score])
+            
+            correlations[score] = {
+                'n': len(valid_data),
+                'pearson_r': pearson_r,
+                'pearson_p': pearson_p,
+                'spearman_r': spearman_r,
+                'spearman_p': spearman_p
+            }
+            
+            all_p_values.extend([pearson_p, spearman_p])
+            all_tests.extend([(score, 'pearson'), (score, 'spearman')])
+        
+        # Multiple testing correction für diese Diagnose
+        if correction_method and len(all_p_values) > 0:
+            rejected, corrected_p_values, _, _ = multipletests(
+                all_p_values, alpha=alpha, method=correction_method
+            )
+            
+            for i, (score, test_type) in enumerate(all_tests):
+                if score in correlations:
+                    correlations[score][f'{test_type}_p_corrected'] = corrected_p_values[i]
+                    correlations[score][f'{test_type}_significant_corrected'] = rejected[i]
+        
+        diagnosis_results[diagnosis] = correlations
+    
+    # Erstelle kombinierte Plots mit Korrekturen
+    if diagnosis_results:
+        create_combined_diagnosis_heatmap_with_corrections(
+            diagnosis_results, list(diagnosis_results.keys()), score_columns, 
+            deviation_metric, save_dir, correction_method
+        )
+    
+    return diagnosis_results
+
+def create_combined_diagnosis_heatmap_with_corrections(diagnosis_correlations, diagnoses, 
+                                                     score_columns, deviation_metric, 
+                                                     save_dir, correction_method):
+    """Erstellt kombinierte Heatmaps mit und ohne Korrektur"""
+    
+    def create_diagnosis_matrices(use_corrected=False):
+        correlation_matrix = np.full((len(diagnoses), len(score_columns)), np.nan)
+        p_value_matrix = np.full((len(diagnoses), len(score_columns)), np.nan)
+        
+        p_suffix = '_corrected' if use_corrected else ''
+        
+        for i, diagnosis in enumerate(diagnoses):
+            for j, score in enumerate(score_columns):
+                if score in diagnosis_correlations[diagnosis]:
+                    correlation_matrix[i, j] = diagnosis_correlations[diagnosis][score]['pearson_r']
+                    
+                    p_key = f'pearson_p{p_suffix}'
+                    p_value_matrix[i, j] = diagnosis_correlations[diagnosis][score].get(
+                        p_key, diagnosis_correlations[diagnosis][score]['pearson_p']
+                    )
+        
+        return correlation_matrix, p_value_matrix
+    
+    def create_annotations(corr_matrix, p_matrix):
+        annotations = []
+        for i in range(len(diagnoses)):
+            row_annotations = []
+            for j in range(len(score_columns)):
+                if np.isnan(corr_matrix[i, j]):
+                    row_annotations.append('')
+                else:
+                    corr_val = corr_matrix[i, j]
+                    p_val = p_matrix[i, j]
+                    
+                    if p_val < 0.001:
+                        stars = '***'
+                    elif p_val < 0.01:
+                        stars = '**'
+                    elif p_val < 0.05:
+                        stars = '*'
+                    else:
+                        stars = ''
+                    
+                    annotation = f'{corr_val:.2f}{stars}'
+                    row_annotations.append(annotation)
+            annotations.append(row_annotations)
+        return annotations
+    
+    # Plot ohne Korrektur
+    correlation_matrix, p_value_matrix = create_diagnosis_matrices(False)
+    
+    plt.figure(figsize=(16, max(6, len(diagnoses) * 0.8)))
+    mask = np.isnan(correlation_matrix)
+    annotations = create_annotations(correlation_matrix, p_value_matrix)
+    
+    sns.heatmap(correlation_matrix,
+                xticklabels=score_columns,
+                yticklabels=diagnoses,
+                annot=annotations,
+                fmt='',
+                cmap='RdBu_r',
+                center=0,
+                mask=mask,
+                square=False,
+                cbar_kws={'label': 'Pearson Correlation Coefficient'},
+                linewidths=0.5,
+                linecolor='white')
+    
+    plt.title(f'Correlations by Patient Groups (Uncorrected)\n(* p<0.05, ** p<0.01, *** p<0.001)', 
+              fontsize=14, pad=20)
+    plt.xlabel('Clinical Scores', fontsize=12)
+    plt.ylabel('Patient Groups', fontsize=12)
+    plt.xticks(rotation=45, ha='right')
+    plt.yticks(rotation=0)
+    plt.tight_layout()
+    plt.savefig(f"{save_dir}/figures/correlations/diagnosis_correlations_uncorrected.png", 
+                dpi=300, bbox_inches='tight')
+    plt.close()
+    
+    # Plot mit Korrektur
+    if correction_method:
+        correlation_matrix_corr, p_value_matrix_corr = create_diagnosis_matrices(True)
+        
+        plt.figure(figsize=(16, max(6, len(diagnoses) * 0.8)))
+        mask = np.isnan(correlation_matrix_corr)
+        annotations_corr = create_annotations(correlation_matrix_corr, p_value_matrix_corr)
+        
+        sns.heatmap(correlation_matrix_corr,
+                    xticklabels=score_columns,
+                    yticklabels=diagnoses,
+                    annot=annotations_corr,
+                    fmt='',
+                    cmap='RdBu_r',
+                    center=0,
+                    mask=mask,
+                    square=False,
+                    cbar_kws={'label': 'Pearson Correlation Coefficient'},
+                    linewidths=0.5,
+                    linecolor='white')
+        
+        plt.title(f'Correlations by Patient Groups ({correction_method.upper()} Corrected)\n(* p<0.05, ** p<0.01, *** p<0.001)', 
+                  fontsize=14, pad=20)
+        plt.xlabel('Clinical Scores', fontsize=12)
+        plt.ylabel('Patient Groups', fontsize=12)
+        plt.xticks(rotation=45, ha='right')
+        plt.yticks(rotation=0)
+        plt.tight_layout()
+        plt.savefig(f"{save_dir}/figures/correlations/diagnosis_correlations_{correction_method}_corrected.png", 
+                    dpi=300, bbox_inches='tight')
+        plt.close()
+
+def create_corrected_summary_tables(correlation_results, save_dir, correction_method):
+    """Erstellt Zusammenfassungstabellen mit Korrekturen"""
+    
+    summary_data = []
+    
+    for dev_metric, scores in correlation_results.items():
+        for score, results in scores.items():
+            row = {
+                'Deviation_Metric': dev_metric,
+                'Clinical_Score': score,
+                'N': results['n'],
+                'Pearson_r': results['pearson_r'],
+                'Pearson_p': results['pearson_p'],
+                'Spearman_r': results['spearman_r'],
+                'Spearman_p': results['spearman_p']
+            }
+            
+            # Füge korrigierte Werte hinzu falls verfügbar
+            if correction_method:
+                row.update({
+                    'Pearson_p_corrected': results.get('pearson_p_corrected', np.nan),
+                    'Spearman_p_corrected': results.get('spearman_p_corrected', np.nan),
+                    'Pearson_significant_corrected': results.get('pearson_significant_corrected', False),
+                    'Spearman_significant_corrected': results.get('spearman_significant_corrected', False)
+                })
+            
+            summary_data.append(row)
+    
+    summary_df = pd.DataFrame(summary_data)
+    summary_df = summary_df.sort_values('Pearson_p')
+    
+    # Speichere Tabelle
+    filename = f"correlation_summary{'_' + correction_method if correction_method else ''}.csv"
+    summary_df.to_csv(f"{save_dir}/figures/correlations/{filename}", index=False)
+    
+    # Zeige Ergebnisse
+    print(f"\n=== CORRELATION SUMMARY ===")
+    if correction_method:
+        print(f"Multiple testing correction: {correction_method}")
+        sig_uncorrected = sum(summary_df['Pearson_p'] < 0.05)
+        sig_corrected = sum(summary_df['Pearson_significant_corrected'])
+        print(f"Significant correlations: {sig_uncorrected} uncorrected, {sig_corrected} corrected")
+    else:
+        sig_uncorrected = sum(summary_df['Pearson_p'] < 0.05)
+        print(f"Significant correlations: {sig_uncorrected}")
+    
+    return summary_df
+
+# HAUPTFUNKTION MIT KORREKTUROPTIONEN
+def run_correlation_analysis(results_df, save_dir, 
+                                            correction_method='fdr_bh',
+                                            metadata_path=None, 
+                                            diagnoses_to_include=None,
+                                            alpha=0.1):
+    """
+    Hauptfunktion für Korrelationsanalyse mit Korrekturen
+    
+    Parameters:
+    -----------
+    results_df : DataFrame
+        Deine results DataFrame mit Deviation Scores
+    save_dir : str
+        Pfad zum Speichern
+    correction_method : str
+        'bonferroni', 'fdr_bh', 'fdr_by', 'holm', oder None
+    metadata_path : str, optional
+        Pfad zur Metadaten-CSV
+    diagnoses_to_include : list, optional
+        Liste der Diagnosen zum Einschließen
+    alpha : float
+        Signifikanzlevel (default: 0.05)
+    """
+    
+    # Lade Metadaten
+    if metadata_path:
+        metadata_df = pd.read_csv(metadata_path)
+    else:
+        metadata_df = pd.read_csv('/workspace/project/catatonia_VAE-main_bq/metadata_20250110/full_data_with_codiagnosis_and_scores.csv')
+    
+    # Führe Analyse durch
+    correlation_results, merged_data = analyze_score_correlations_with_corrections(
+        results_df=results_df,
+        metadata_df=metadata_df, 
+        save_dir=save_dir,
+        diagnoses_to_include=diagnoses_to_include,
+        correction_method=correction_method,
+        alpha=alpha
+    )
+    
+    print(f"\nAnalysis completed with correction method: {correction_method}")
+    print(f"Results saved to: {save_dir}/figures/correlations/")
+    
+    return correlation_results, merged_data
