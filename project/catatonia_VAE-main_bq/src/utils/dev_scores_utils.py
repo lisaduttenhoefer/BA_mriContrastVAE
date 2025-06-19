@@ -18,6 +18,8 @@ from sklearn.metrics import roc_curve, auc, precision_recall_curve
 import umap
 from sklearn.preprocessing import StandardScaler
 from scipy.stats import spearmanr, pearsonr
+from statsmodels.stats.multitest import multipletests
+
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -60,16 +62,27 @@ def create_color_summary_table(data, metric, color_col, diagnoses, save_dir):
     
     return summary_df
 
-def create_colored_jitter_plots(data, metadata_df, metric, summary_df, plot_order, norm_diagnosis, 
-                               save_dir, color_columns, diagnosis_palette):
-    #Create jitter plots colored by numerical values from specified columns
-    #data: results dataset containing the metric and diagnosis information
-    #metadata_df: Additional dataframe containing metadata columns for coloring (scores etc)
+def create_colored_jitter_plots(data, metadata_df, metric, summary_df, plot_order, norm_diagnosis,
+                               save_dir, color_columns, diagnosis_palette, split_ctt=False, custom_colors=None):
+    """Create jitter plots colored by numerical values from specified columns
+    
+    Args:
+        data: results dataset containing the metric and diagnosis information
+        metadata_df: Additional dataframe containing metadata columns for coloring (scores etc)
+        split_ctt: If True, keep CTT-SCHZ and CTT-MDD separate. If False, combine as CTT
+        custom_colors: Optional dict with custom color mapping for diagnoses
+    """
     
     os.makedirs(f"{save_dir}/figures/distributions/colored_by_columns", exist_ok=True)
     
+    # Handle CTT splitting option
+    data_processed = data.copy()
+    if not split_ctt:
+        # Combine CTT-SCHZ and CTT-MDD into CTT
+        data_processed.loc[data_processed['Diagnosis'].isin(['CTT-SCHZ', 'CTT-MDD']), 'Diagnosis'] = 'CTT'
+    
     # Check if we can merge on filename or need to use index
-    merged_data = pd.merge(data, metadata_df, on='Filename', how='inner')
+    merged_data = pd.merge(data_processed, metadata_df, on='Filename', how='inner')
     print(f"Merged data on 'Filename' column. Merged data shape: {merged_data.shape}")
     
     if merged_data.empty:
@@ -91,14 +104,24 @@ def create_colored_jitter_plots(data, metadata_df, metric, summary_df, plot_orde
         
         if color_col in complete_data_columns:
             # Use all diagnoses for Age and Sex -> got metadata for all
-            current_plot_order = plot_order
+            current_plot_order = plot_order.copy()
+            # Adjust plot order based on CTT splitting
+            if not split_ctt and 'CTT-SCHZ' in current_plot_order and 'CTT-MDD' in current_plot_order:
+                current_plot_order = [d for d in current_plot_order if d not in ['CTT-SCHZ', 'CTT-MDD']]
+                if 'CTT' not in current_plot_order:
+                    current_plot_order.append('CTT')
             filtered_data = merged_data.copy()
             plot_title_suffix = "All Diagnoses"
         else:
             # Use only CTT-SCHZ and CTT-MDD for other columns -> got metadata only for WhiteCAT and NSS patients
-            current_plot_order = ['CTT-SCHZ', 'CTT-MDD']
-            filtered_data = merged_data[merged_data['Diagnosis_x'].isin(current_plot_order)].copy()
-            plot_title_suffix = "CTT-SCHZ vs CTT-MDD"
+            if split_ctt:
+                current_plot_order = ['CTT-SCHZ', 'CTT-MDD']
+                filtered_data = merged_data[merged_data['Diagnosis_x'].isin(current_plot_order)].copy()
+                plot_title_suffix = "CTT-SCHZ vs CTT-MDD"
+            else:
+                current_plot_order = ['CTT']
+                filtered_data = merged_data[merged_data['Diagnosis_x'] == 'CTT'].copy()
+                plot_title_suffix = "CTT Combined"
         
         filtered_data = filtered_data.dropna(subset=[color_col, metric])
         
@@ -115,7 +138,7 @@ def create_colored_jitter_plots(data, metadata_df, metric, summary_df, plot_orde
             value_to_code = {val: i for i, val in enumerate(unique_values)}
             color_values_numeric = color_values.map(value_to_code)
             if color_col == 'Sex':
-                colors = ['#ff69b4', '#4169e1'] 
+                colors = custom_colors.get('Sex', ['#ff69b4', '#4169e1']) if custom_colors else ['#ff69b4', '#4169e1']
                 if len(unique_values) == 2:
                     cmap = LinearSegmentedColormap.from_list('sex_colors', colors, N=2)
                 else:
@@ -131,11 +154,11 @@ def create_colored_jitter_plots(data, metadata_df, metric, summary_df, plot_orde
             categorical_labels = None
             is_categorical = False
         
-        scatter = plt.scatter(filtered_data[metric], 
-                            [current_plot_order.index(diag) for diag in filtered_data['Diagnosis_x']], 
-                            c=color_values, 
+        scatter = plt.scatter(filtered_data[metric],
+                            [current_plot_order.index(diag) for diag in filtered_data['Diagnosis_x']],
+                            c=color_values,
                             cmap=cmap,
-                            s=30, 
+                            s=30,
                             alpha=0.7,
                             edgecolors='white',
                             linewidth=0.5)
@@ -148,11 +171,11 @@ def create_colored_jitter_plots(data, metadata_df, metric, summary_df, plot_orde
         plt.clf()
         plt.figure(figsize=(14, 6))
         
-        scatter = plt.scatter(filtered_data[metric], 
+        scatter = plt.scatter(filtered_data[metric],
                             y_jittered,
-                            c=color_values, 
+                            c=color_values,
                             cmap=cmap,
-                            s=30, 
+                            s=30,
                             alpha=0.7,
                             edgecolors='white',
                             linewidth=0.5)
@@ -166,28 +189,28 @@ def create_colored_jitter_plots(data, metadata_df, metric, summary_df, plot_orde
         else:
             cbar.set_label(f'{color_col.replace("_", " ").title()}', rotation=270, labelpad=20)
         
-        # Add errorbars and statistics
-        current_summary = summary_df[summary_df["Diagnosis"].isin(current_plot_order)]
+        # # Add errorbars and statistics
+        # current_summary = summary_df[summary_df["Diagnosis"].isin(current_plot_order)]
         
-        for i, diagnosis in enumerate(current_plot_order):
-            diagnosis_data = current_summary[current_summary["Diagnosis"] == diagnosis]
-            if len(diagnosis_data) > 0:
-                mean_val = diagnosis_data["mean"].iloc[0]
-                ci_val = diagnosis_data["ci95"].iloc[0]
+        # for i, diagnosis in enumerate(current_plot_order):
+        #     diagnosis_data = current_summary[current_summary["Diagnosis"] == diagnosis]
+        #     if len(diagnosis_data) > 0:
+        #         mean_val = diagnosis_data["mean"].iloc[0]
+        #         ci_val = diagnosis_data["ci95"].iloc[0]
                 
-                # Add errorbar
-                plt.errorbar(mean_val, i, xerr=ci_val, fmt='none',
-                           color='black', capsize=4, capthick=2,
-                           elinewidth=2, alpha=0.9, zorder=10)
+        #         # Add errorbar
+        #         plt.errorbar(mean_val, i, xerr=ci_val, fmt='none',
+        #                    color='black', capsize=4, capthick=2,
+        #                    elinewidth=2, alpha=0.9, zorder=10)
                 
-                # Add mean value as a larger marker
-                plt.scatter(mean_val, i, color='black', s=100, 
-                          marker='D', alpha=0.9, zorder=11, 
-                          edgecolors='white', linewidth=1)
+        #         # Add mean value as a larger marker
+        #         plt.scatter(mean_val, i, color='black', s=100,
+        #                   marker='D', alpha=0.9, zorder=11,
+        #                   edgecolors='white', linewidth=1)
         
     
         plt.yticks(range(len(current_plot_order)), current_plot_order)
-        plt.title(f"{metric.replace('_', ' ').title()} by Diagnosis\nColored by {color_col.replace('_', ' ').title()} ({plot_title_suffix})", 
+        plt.title(f"{metric.replace('_', ' ').title()} by Diagnosis\nColored by {color_col.replace('_', ' ').title()} ({plot_title_suffix})",
                  fontsize=14, pad=20)
         plt.xlabel(f"{metric.replace('_', ' ').title()}", fontsize=12)
         plt.ylabel("Diagnosis", fontsize=12)
@@ -196,8 +219,9 @@ def create_colored_jitter_plots(data, metadata_df, metric, summary_df, plot_orde
         sns.despine()
         plt.tight_layout()
         
-        filename = f"{metric}_jitterplot_colored_by_{color_col}.png"
-        plt.savefig(f"{save_dir}/figures/distributions/colored_by_columns/{filename}", 
+        ctt_suffix = "split" if split_ctt else "combined"
+        filename = f"{metric}_jitterplot_colored_by_{color_col}_ctt_{ctt_suffix}.png"
+        plt.savefig(f"{save_dir}/figures/distributions/colored_by_columns/{filename}",
                    dpi=300, bbox_inches='tight')
         plt.close()
         create_color_summary_table(filtered_data, metric, color_col, current_plot_order, save_dir)
@@ -311,20 +335,32 @@ def calculate_deviations(normative_models, data_tensor, norm_diagnosis, annotati
     return results_df
 
 
-def calculate_group_pvalues(results_df, norm_diagnosis):
-    #Calculate p-values for each diagnosis group compared to the control group
+def calculate_group_pvalues(results_df, norm_diagnosis, split_ctt=False):
+    """Calculate p-values for each diagnosis group compared to the control group
+    
+    Args:
+        results_df: DataFrame with results
+        norm_diagnosis: Control group diagnosis
+        split_ctt: If True, keep CTT-SCHZ and CTT-MDD separate. If False, combine as CTT
+    """
+
+    # Handle CTT splitting
+    results_processed = results_df.copy()
+    if not split_ctt:
+        # Combine CTT-SCHZ and CTT-MDD into CTT
+        results_processed.loc[results_processed['Diagnosis'].isin(['CTT-SCHZ', 'CTT-MDD']), 'Diagnosis'] = 'CTT'
 
     # Get control group data
-    control_mask = results_df["Diagnosis"] == norm_diagnosis
+    control_mask = results_processed["Diagnosis"] == norm_diagnosis
     if not control_mask.any():
-        print(f"WARNING: No control group '{norm_diagnosis}' found in data. Available diagnoses: {results_df['Diagnosis'].unique()}")
+        print(f"WARNING: No control group '{norm_diagnosis}' found in data. Available diagnoses: {results_processed['Diagnosis'].unique()}")
         # Use bottom 25% as reference if no explicit control group
-        control_indices = np.argsort(results_df["deviation_score_zscore"])[:len(results_df)//4]
-        control_mask = np.zeros(len(results_df), dtype=bool)
+        control_indices = np.argsort(results_processed["deviation_score_zscore"])[:len(results_processed)//4]
+        control_mask = np.zeros(len(results_processed), dtype=bool)
         control_mask[control_indices] = True
         print(f"Using bottom 25% ({control_mask.sum()} subjects) as reference group")
     
-    control_data = results_df[control_mask]
+    control_data = results_processed[control_mask]
     print(f"Control group ({norm_diagnosis}) size: {len(control_data)}")
     
     # Metrics to test
@@ -333,7 +369,7 @@ def calculate_group_pvalues(results_df, norm_diagnosis):
     # Calculate p-values for each diagnosis group vs control
     group_pvalues = {}
     
-    diagnoses = results_df["Diagnosis"].unique()
+    diagnoses = results_processed["Diagnosis"].unique()
     diagnoses = [d for d in diagnoses if d != norm_diagnosis]  # Exclude control group
     
     for metric in metrics:
@@ -341,21 +377,21 @@ def calculate_group_pvalues(results_df, norm_diagnosis):
         control_values = control_data[metric].values
         
         for diagnosis in diagnoses:
-            group_data = results_df[results_df["Diagnosis"] == diagnosis]
+            group_data = results_processed[results_processed["Diagnosis"] == diagnosis]
             if len(group_data) > 0:
                 group_values = group_data[metric].values
                
-                # Use Mann-Whitney U test (non-parametric) 
+                # Use Mann-Whitney U test (non-parametric)
                 try:
                     statistic, p_value = scipy_stats.mannwhitneyu(
-                        group_values, control_values, 
+                        group_values, control_values,
                         alternative='two-sided'
                     )
                     print(f"    Mann-Whitney U: statistic={statistic:.2f}, p={p_value:.6f}")
                     
                     # Double-check with t-test for comparison
                     t_stat, t_pval = scipy_stats.ttest_ind(
-                        group_values, control_values, 
+                        group_values, control_values,
                         equal_var=False
                     )
                     print(f"    T-test (comparison): t={t_stat:.2f}, p={t_pval:.6f}")
@@ -366,73 +402,126 @@ def calculate_group_pvalues(results_df, norm_diagnosis):
     
     return group_pvalues
 
-def plot_deviation_distributions(results_df, save_dir, col_jitter, norm_diagnosis):
-    #Plot distributions of deviation metrics by diagnosis group with group p-values
+def create_diagnosis_palette(split_ctt=False, custom_colors=None):
+    """Create consistent diagnosis color palette
+    
+    Args:
+        split_ctt: If True, separate colors for CTT-SCHZ and CTT-MDD. If False, single CTT color
+        custom_colors: Optional dict with custom color mapping
+    """
+    
+    if custom_colors:
+        return custom_colors
+    
+    # Default color palette
+    base_palette = sns.light_palette("blue", n_colors=6, reverse=True)
+    
+    if split_ctt:
+        diagnosis_order = ["HC", "SCHZ", "MDD", "CTT", "CTT-MDD", "CTT-SCHZ"]
+    else:
+        diagnosis_order = ["HC", "SCHZ", "MDD", "CTT"]
+        base_palette = base_palette[:4]  # Use fewer colors when not splitting CTT
+    
+    diagnosis_palette = dict(zip(diagnosis_order, base_palette))
+    
+    return diagnosis_palette
+
+def plot_deviation_distributions(results_df, save_dir, col_jitter, norm_diagnosis, name,
+                                split_ctt=False, custom_colors=None):
+    """Plot distributions of deviation metrics by diagnosis group with group p-values
+    
+    Args:
+        results_df: DataFrame with results
+        save_dir: Directory to save plots
+        col_jitter: Whether to create colored jitter plots
+        norm_diagnosis: Control group diagnosis
+        split_ctt: If True, keep CTT-SCHZ and CTT-MDD separate. If False, combine as CTT
+        custom_colors: Optional dict with custom color mapping for diagnoses
+    """
 
     os.makedirs(f"{save_dir}/figures/distributions", exist_ok=True)
     
+    # Handle CTT splitting
+    results_processed = results_df.copy()
+    if not split_ctt:
+        # Combine CTT-SCHZ and CTT-MDD into CTT
+        results_processed.loc[results_processed['Diagnosis'].isin(['CTT-SCHZ', 'CTT-MDD']), 'Diagnosis'] = 'CTT'
+    
     # Create color palette
-    palette = sns.light_palette("blue", n_colors=6, reverse=True)
-    diagnosis_order = ["HC", "SCHZ", "MDD", "CTT", "CTT-MDD", "CTT-SCHZ"]
-    diagnosis_palette = dict(zip(diagnosis_order, palette))
+    diagnosis_palette = create_diagnosis_palette(split_ctt, custom_colors)
 
     # Calculate group p-values
-    group_pvalues = calculate_group_pvalues(results_df, norm_diagnosis)
+    group_pvalues = calculate_group_pvalues(results_processed, norm_diagnosis, split_ctt)
+
+    # Determine selected diagnoses based on CTT splitting
+    if split_ctt:
+        selected_diagnoses = ["HC", "SCHZ", "MDD", "CTT", "CTT-MDD", "CTT-SCHZ"]
+    else:
+        selected_diagnoses = ["HC", "SCHZ", "MDD", "CTT"]
+
+    # Filter to only include diagnoses that exist in the data
+    available_diagnoses = [d for d in selected_diagnoses if d in results_processed["Diagnosis"].unique()]
 
     # Plot reconstruction error distributions
     plt.figure(figsize=(12, 8))
-    sns.kdeplot(data=results_df, x="reconstruction_error", hue="Diagnosis", palette=diagnosis_palette, common_norm=False)
-    plt.title("Reconstruction Error Distribution by Diagnosis", fontsize=16)
+    sns.kdeplot(data=results_processed[results_processed['Diagnosis'].isin(available_diagnoses)], 
+                x="reconstruction_error", hue="Diagnosis", palette=diagnosis_palette, common_norm=False)
+    plt.title(name, fontsize=16)
     plt.xlabel("Mean Reconstruction Error", fontsize=14)
     plt.ylabel("Density", fontsize=14)
     plt.legend(title="Diagnosis", fontsize=12)
     sns.despine()
     plt.tight_layout()
-    plt.savefig(f"{save_dir}/figures/distributions/recon_error_dist.png", dpi=300)
+    ctt_suffix = "split" if split_ctt else "combined"
+    plt.savefig(f"{save_dir}/figures/distributions/recon_error_dist_ctt_{ctt_suffix}.png", dpi=300)
     plt.close()
     
     # Plot KL divergence distributions
     plt.figure(figsize=(12, 8))
-    sns.kdeplot(data=results_df, x="kl_divergence", hue="Diagnosis", palette=diagnosis_palette, common_norm=False)
-    plt.title("KL Divergence Distribution by Diagnosis", fontsize=16)
+    sns.kdeplot(data=results_processed[results_processed['Diagnosis'].isin(available_diagnoses)], 
+                x="kl_divergence", hue="Diagnosis", palette=diagnosis_palette, common_norm=False)
+    plt.title(name, fontsize=16)
     plt.xlabel("Mean KL Divergence", fontsize=14)
     plt.ylabel("Density", fontsize=14)
     plt.legend(title="Diagnosis", fontsize=12)
     sns.despine()
     plt.tight_layout()
-    plt.savefig(f"{save_dir}/figures/distributions/kl_div_dist.png", dpi=300)
+    plt.savefig(f"{save_dir}/figures/distributions/kl_div_dist_ctt_{ctt_suffix}.png", dpi=300)
     plt.close()
     
     # Plot combined deviation score distributions
     plt.figure(figsize=(12, 8))
-    sns.kdeplot(data=results_df, x="deviation_score", hue="Diagnosis", palette=diagnosis_palette, common_norm=False)
-    plt.title("Combined Deviation Score Distribution by Diagnosis", fontsize=16)
+    sns.kdeplot(data=results_processed[results_processed['Diagnosis'].isin(available_diagnoses)], 
+                x="deviation_score", hue="Diagnosis", palette=diagnosis_palette, common_norm=False)
+    plt.title(name, fontsize=16)
     plt.xlabel("Deviation Score", fontsize=14)
     plt.ylabel("Density", fontsize=14)
     plt.legend(title="Diagnosis", fontsize=12)
     sns.despine()
     plt.tight_layout()
-    plt.savefig(f"{save_dir}/figures/distributions/deviation_score_dist.png", dpi=300)
+    plt.savefig(f"{save_dir}/figures/distributions/deviation_score_dist_ctt_{ctt_suffix}.png", dpi=300)
     plt.close()
     
     # Plot violin plots for all metrics
     plt.figure(figsize=(15, 10))
     plt.subplot(3, 1, 1)
-    sns.violinplot(data=results_df, x="Diagnosis", y="reconstruction_error", palette=diagnosis_palette)
+    sns.violinplot(data=results_processed[results_processed['Diagnosis'].isin(available_diagnoses)], 
+                   x="Diagnosis", y="reconstruction_error", palette=diagnosis_palette, order=available_diagnoses)
     plt.title("Reconstruction Error by Diagnosis", fontsize=14)
     plt.xlabel("")
     plt.subplot(3, 1, 2)
-    sns.violinplot(data=results_df, x="Diagnosis", y="kl_divergence", hue="Diagnosis", palette=diagnosis_palette, legend = False)
+    sns.violinplot(data=results_processed[results_processed['Diagnosis'].isin(available_diagnoses)], 
+                   x="Diagnosis", y="kl_divergence", hue="Diagnosis", palette=diagnosis_palette, 
+                   legend=False, order=available_diagnoses)
     plt.title("KL Divergence by Diagnosis", fontsize=14)
     plt.xlabel("")
     plt.subplot(3, 1, 3)
-    sns.violinplot(data=results_df, x="Diagnosis", y="deviation_score", palette=diagnosis_palette)
+    sns.violinplot(data=results_processed[results_processed['Diagnosis'].isin(available_diagnoses)], 
+                   x="Diagnosis", y="deviation_score", palette=diagnosis_palette, order=available_diagnoses)
     plt.title("Combined Deviation Score by Diagnosis", fontsize=14)
     plt.tight_layout()
-    plt.savefig(f"{save_dir}/figures/distributions/metrics_violin_plots.png", dpi=300)
+    plt.savefig(f"{save_dir}/figures/distributions/metrics_violin_plots_ctt_{ctt_suffix}.png", dpi=300)
     plt.close()
-
-    selected_diagnoses = ["HC", "SCHZ", "MDD", "CTT", "CTT-MDD", "CTT-SCHZ"]
 
     # Calculate summary statistics for errorbar plots
     metrics = ["reconstruction_error", "kl_divergence", "deviation_score"]
@@ -440,7 +529,7 @@ def plot_deviation_distributions(results_df, save_dir, col_jitter, norm_diagnosi
 
     for metric in metrics:
         # Filter data for selected diagnoses
-        filtered_data = results_df[results_df["Diagnosis"].isin(selected_diagnoses)]
+        filtered_data = results_processed[results_processed["Diagnosis"].isin(available_diagnoses)]
         
         summary_df = (
             filtered_data
@@ -458,21 +547,19 @@ def plot_deviation_distributions(results_df, save_dir, col_jitter, norm_diagnosi
         )
        
         # Sort in desired order (bottom to top)
-        diagnosis_order_plot = selected_diagnoses[::-1]
+        diagnosis_order_plot = available_diagnoses[::-1]
         summary_df["Diagnosis"] = pd.Categorical(summary_df["Diagnosis"], categories=diagnosis_order_plot, ordered=True)
         summary_df = summary_df.sort_values("Diagnosis")
         
         summary_dict[metric] = summary_df
         
-        #simple errorbar plot -> Pinaya paper
+        # Simple errorbar plot -> Pinaya paper
         plt.figure(figsize=(8, 6))
         
         # Filter only diagnoses that actually have data
-        available_diagnoses = filtered_data["Diagnosis"].unique()
-        plot_order = [d for d in diagnosis_order_plot if d in available_diagnoses]
+        plot_order = [d for d in diagnosis_order_plot if d in filtered_data["Diagnosis"].unique()]
         
-        
-        plt.errorbar(summary_df["mean"], summary_df["Diagnosis"], 
+        plt.errorbar(summary_df["mean"], summary_df["Diagnosis"],
                     xerr=summary_df["ci95"],
                     fmt='s', color='black', capsize=5, markersize=8)
         
@@ -480,69 +567,56 @@ def plot_deviation_distributions(results_df, save_dir, col_jitter, norm_diagnosi
         summary_df_plot = summary_df[summary_df["Diagnosis"].isin(plot_order)]
         # Use group p-values for coloring
         p_values_for_color = summary_df_plot["p_value"].fillna(0.5)  # Fill NaN with neutral value
-        scatter = plt.scatter(summary_df_plot["mean"], summary_df_plot["Diagnosis"], 
-                            c=p_values_for_color, cmap='RdYlBu_r', 
+        scatter = plt.scatter(summary_df_plot["mean"], summary_df_plot["Diagnosis"],
+                            c=p_values_for_color, cmap='RdYlBu_r',
                             s=100, alpha=0.7, edgecolors='black')
         
-        plt.title(f"{metric.replace('_', ' ').title()}", fontsize=14)
-        plt.xlabel("Deviation Metric", fontsize=12)
+        plt.title(name, fontsize=14)
+        plt.xlabel(f"{metric.replace('_', ' ').title()}", fontsize=12)
         plt.ylabel("Diagnosis", fontsize=12)    
         sns.despine()
         plt.tight_layout()
-        plt.savefig(f"{save_dir}/figures/distributions/{metric}_errorbar.png", dpi=300)
+        plt.savefig(f"{save_dir}/figures/distributions/{metric}_errorbar_ctt_{ctt_suffix}.png", dpi=300)
         plt.close()
         
-        # Create jitterplot with p-values and mean values (current version)
+        # Create jitterplot with p-values and mean values
         plt.figure(figsize=(12, 6))  # Made wider to accommodate value labels
         
-        mdd_color = diagnosis_palette.get('MDD', '#4c72b0')  # get specific color (pretty blue) -> fallback to blue if MDD not found
+        # Use consistent color from palette
+        if 'MDD' in diagnosis_palette:
+            plot_color = diagnosis_palette['MDD']
+        else:
+            plot_color = '#4c72b0'  # fallback color
         
-        sns.stripplot(data=filtered_data, y="Diagnosis", x=metric, 
-                    order=plot_order, color=mdd_color, 
+        sns.stripplot(data=filtered_data, y="Diagnosis", x=metric,
+                    order=plot_order, color=plot_color,
                     size=3, alpha=0.6, jitter=0.3)
         
         # Add errorbars, p-values, and mean values
         for i, diagnosis in enumerate(plot_order):
             diagnosis_data = summary_df[summary_df["Diagnosis"] == diagnosis]
-            if len(diagnosis_data) > 0:  
+            if len(diagnosis_data) > 0:
                 mean_val = diagnosis_data["mean"].iloc[0]
                 ci_val = diagnosis_data["ci95"].iloc[0]
                 p_val = diagnosis_data["p_value"].iloc[0]
                 n_val = diagnosis_data["count"].iloc[0]
 
-                plt.errorbar(mean_val, i, xerr=ci_val, fmt='none', 
-                            color='black', capsize=4, capthick=1.5, 
+                plt.errorbar(mean_val, i, xerr=ci_val, fmt='none',
+                            color='black', capsize=4, capthick=1.5,
                             elinewidth=1.5, alpha=0.8)
-            
-                # Add p-value text to the right of errorbar (only if not control group and p-value exists)
-                # if diagnosis != norm_diagnosis and not np.isnan(p_val):
-                #     # Format p-value
-                #     if p_val < 0.001:
-                #         p_text = "p<0.001***"
-                #     elif p_val < 0.01:
-                #         p_text = f"p<0.01**"
-                #     elif p_val < 0.05:
-                #         p_text = f"p={p_val:.3f}*"
-                #     else:
-                #         p_text = f"p={p_val:.3f}"
-                    
-                #     # Position text to the right of the errorbar
-                #     text_x = mean_val + ci_val + (plt.xlim()[1] - plt.xlim()[0]) * 0.02
-                #     plt.text(text_x, i, p_text, va='center', ha='left', 
-                #             fontsize=9, fontweight='bold' if p_val < 0.05 else 'normal',
-                #             color='red' if p_val < 0.05 else 'black')
         
-        plt.title(f"{metric.replace('_', ' ').title()} by Diagnosis (vs {norm_diagnosis})", fontsize=14)
-        plt.xlabel("Deviation Metric", fontsize=12)
+        plt.title(f"{name} (vs {norm_diagnosis})", fontsize=14)
+        plt.xlabel(f"{metric.replace('_', ' ').title()}", fontsize=12)
         plt.ylabel("Diagnosis", fontsize=12)
-        plt.subplots_adjust(left=0.25) 
+        plt.subplots_adjust(left=0.25)
         sns.despine()
         plt.tight_layout()
-        plt.savefig(f"{save_dir}/figures/distributions/{metric}_jitterplot_with_values.png", dpi=300, bbox_inches='tight')
+        plt.savefig(f"{save_dir}/figures/distributions/{metric}_jitterplot_with_values_ctt_{ctt_suffix}.png", 
+                   dpi=300, bbox_inches='tight')
         plt.close()
 
-        if col_jitter: 
-            metadata_df = pd.read_csv('/workspace/project/catatonia_VAE-main_bq/metadata_20250110/full_data_with_codiagnosis_and_scores.csv')  
+        if col_jitter:
+            metadata_df = pd.read_csv('/workspace/project/catatonia_VAE-main_bq/metadata_20250110/full_data_with_codiagnosis_and_scores.csv')
             #column names in the metadata df that should be used for coloring
             potential_color_columns = ['Age', 'Sex', 'Dataset',
                                        'GAF_Score', 'PANSS_Positive', 'PANSS_Negative',
@@ -557,17 +631,82 @@ def plot_deviation_distributions(results_df, save_dir, col_jitter, norm_diagnosi
             else:
                 
                 create_colored_jitter_plots(
-                    data=filtered_data,  
-                    metadata_df=metadata_df,  
+                    data=filtered_data,
+                    metadata_df=metadata_df,
                     metric=metric,    
-                    summary_df=summary_df,  
-                    plot_order=plot_order, 
-                    norm_diagnosis=norm_diagnosis,  
-                    save_dir=save_dir,  
-                    color_columns=color_columns,  
-                    diagnosis_palette=diagnosis_palette  
+                    summary_df=summary_df,
+                    plot_order=plot_order,
+                    norm_diagnosis=norm_diagnosis,
+                    save_dir=save_dir,
+                    color_columns=color_columns,
+                    diagnosis_palette=diagnosis_palette,
+                    split_ctt=split_ctt,
+                    custom_colors=custom_colors
                 )
 
+    return summary_dict
+
+def setup_plotting_parameters(split_ctt=False, custom_colors=None):
+    """Setup consistent plotting parameters for all functions
+    
+    Args:
+        split_ctt: If True, keep CTT-SCHZ and CTT-MDD separate. If False, combine as CTT
+        custom_colors: Optional dict with custom color mapping for diagnoses
+        
+    Returns:
+        dict: Dictionary with plotting parameters
+    """
+    
+    return {
+        'split_ctt': split_ctt,
+        'custom_colors': custom_colors,
+        'diagnosis_palette': create_diagnosis_palette(split_ctt, custom_colors)
+    }
+
+def run_analysis_with_options(results_df, save_dir, col_jitter, norm_diagnosis, name,
+                             split_ctt=False, custom_colors=None):
+    """Run complete analysis with CTT splitting and color options
+    
+    Args:
+        results_df: DataFrame with deviation results
+        save_dir: Directory to save outputs
+        col_jitter: Whether to create colored jitter plots
+        norm_diagnosis: Control group diagnosis
+        split_ctt: If True, keep CTT-SCHZ and CTT-MDD separate. If False, combine as CTT
+        custom_colors: Optional dict with custom color mapping for diagnoses
+        
+    Example:
+        # Run with CTT combined and default colors
+        run_analysis_with_options(results_df, save_dir, True, "HC", split_ctt=False)
+        
+        # Run with CTT split and custom colors
+        custom_colors = {
+            "HC": "#2E8B57",      # Sea Green
+            "SCHZ": "#DC143C",    # Crimson
+            "MDD": "#4169E1",     # Royal Blue
+            "CTT": "#FF8C00",     # Dark Orange
+            "CTT-SCHZ": "#FF6347", # Tomato
+            "CTT-MDD": "#FFD700"   # Gold
+        }
+        run_analysis_with_options(results_df, save_dir, True, "HC", 
+                                split_ctt=True, custom_colors=custom_colors)
+    """
+    
+    print(f"Running analysis with CTT {'split' if split_ctt else 'combined'}")
+    if custom_colors:
+        print(f"Using custom colors: {custom_colors}")
+    
+    # Run the main plotting function with new parameters
+    summary_dict = plot_deviation_distributions(
+        results_df=results_df,
+        save_dir=save_dir,
+        col_jitter=col_jitter,
+        norm_diagnosis=norm_diagnosis,
+        split_ctt=split_ctt,
+        custom_colors=custom_colors,
+        name=name
+    )
+    
     return summary_dict
 
 def visualize_embeddings_multiple(normative_models, data_tensor, annotations_df, 
@@ -641,14 +780,20 @@ def visualize_embeddings_multiple(normative_models, data_tensor, annotations_df,
         
         plt.figure(figsize=figsize)
         unique_values = plot_df[col].nunique()
-        
+
+        custom_palette = [
+            "#125E8A",  # Lapis Lazuli
+            "#3E885B",  # Sea Green  
+            "#BEDCFE",  # Uranian Blue
+            "#2F4B26",  # Cal Poly Green
+            "#A67DB8",  # Indian Red 
+            "#160C28"   # Dark Purple
+        ]
         #continous vs binary color palettes depending on data
-        if unique_values <= 10:
-            palette = sns.color_palette("colorblind", n_colors=unique_values)
-        elif unique_values <= 20:
-            palette = sns.color_palette("tab20", n_colors=unique_values)
+        if unique_values <= len(custom_palette):
+            palette = custom_palette[:unique_values]  # schneidet auf die Anzahl an Klassen zu
         else:
-            palette = "viridis"
+            palette = sns.color_palette("viridis", n_colors=unique_values)
         
         if plot_df[col].dtype in ['object', 'category'] or unique_values <= 20:
             sns.scatterplot(
@@ -672,8 +817,8 @@ def visualize_embeddings_multiple(normative_models, data_tensor, annotations_df,
             plt.colorbar(scatter, label=col)
         
         plt.title(f"UMAP Visualization - Colored by {col}", fontsize=16)
-        plt.xlabel("UMAP Dimension 1", fontsize=13)
-        plt.ylabel("UMAP Dimension 2", fontsize=13)
+        plt.xlabel("UMAP 1", fontsize=13)
+        plt.ylabel("UMAP 2", fontsize=13)
         
         if plt.gca().get_legend() is not None:
             plt.legend(title=col, fontsize=10, title_fontsize=11, 
@@ -776,8 +921,6 @@ def calculate_cliffs_delta(x, y):
     delta = np.mean(dominance)
     
     return delta
-
-# Function to create subgroups for Catatonia patients
 def create_catatonia_subgroups(results_df, metadata_df, subgroup_columns, high_low_thresholds):
     #Create subgroups of Catatonia patients based on extended WHiteCAT & NSS metadata
     subgroups = {}
@@ -832,6 +975,7 @@ def create_catatonia_subgroups(results_df, metadata_df, subgroup_columns, high_l
     
     return subgroups
 
+
 def analyze_regional_deviations(
         results_df, 
         save_dir, 
@@ -840,12 +984,20 @@ def analyze_regional_deviations(
         atlas_name, 
         roi_names, 
         norm_diagnosis,
-        add_catatonia_subgroups=False, 
+        name, 
+        add_catatonia_subgroups=True, 
         metadata_path=None, 
         subgroup_columns=None, 
-        high_low_thresholds=None):
+        high_low_thresholds=None,
+        merge_ctt_groups=True):  # NEW PARAMETER
     #Analyze regional deviations using ROI names 
     #regional effect sizes -> Cliff's Delta / Cohen's D
+    
+    # NEW: Merge CTT groups if requested
+    if merge_ctt_groups:
+        results_df = results_df.copy()
+        results_df.loc[results_df['Diagnosis'].isin(['CTT-SCHZ', 'CTT-MDD']), 'Diagnosis'] = 'CTT'
+        print("Merged CTT-SCHZ and CTT-MDD into single CTT group")
     
     region_cols = [col for col in results_df.columns if col.startswith("region_")]
     
@@ -871,6 +1023,11 @@ def analyze_regional_deviations(
     if add_catatonia_subgroups and metadata_path and subgroup_columns:
         try:
             metadata_df = pd.read_csv(metadata_path)
+            # MODIFIED: Apply CTT merger to metadata as well
+            if merge_ctt_groups:
+                metadata_df = metadata_df.copy()
+                metadata_df.loc[metadata_df['Diagnosis'].isin(['CTT-SCHZ', 'CTT-MDD']), 'Diagnosis'] = 'CTT'
+            
             catatonia_subgroups = create_catatonia_subgroups(
                 results_df, metadata_df, subgroup_columns, 
                 high_low_thresholds
@@ -1012,13 +1169,13 @@ def analyze_regional_deviations(
         
         for i, bar in enumerate(bars):
             if top_regions.iloc[i]["Cliffs_Delta"] < 0:
-                bar.set_color("blue")
+                bar.set_color("#A1B5D8")
             else:
-                bar.set_color("red")
+                bar.set_color("#D64045")
         
         plt.yticks(range(len(top_regions)), top_regions["ROI_Name"])
         plt.axvline(x=0, color="black", linestyle="--", alpha=0.7)
-        plt.title(f"Top 20 Regions with Largest Effect Sizes - {diagnosis} vs {norm_diagnosis}")
+        plt.title(f"Top 20 Regions ({diagnosis} vs {norm_diagnosis}) \n {name}")
         plt.xlabel("Cliff's Delta")
         plt.tight_layout()
         plt.savefig(f"{save_dir}/figures/top_regions_cliffs_delta_{diagnosis}_vs_{norm_diagnosis}.png", dpi=300, bbox_inches='tight')
@@ -1029,148 +1186,233 @@ def analyze_regional_deviations(
         bars = plt.barh(range(len(top_regions)), top_regions["Cohens_d"])
         
         for i, bar in enumerate(bars):
-            if top_regions.iloc[i]["Cohens_d"] < 0:
-                bar.set_color("blue")
+            if top_regions.iloc[i]["Cliffs_Delta"] < 0:
+                bar.set_color("#A1B5D8")
             else:
-                bar.set_color("red")
+                bar.set_color("#D64045")
                 
         plt.yticks(range(len(top_regions)), top_regions["ROI_Name"])
         plt.axvline(x=0, color="black", linestyle="--", alpha=0.7)
-        plt.title(f"Top 20 Regions with Largest Effect Sizes - {diagnosis} vs {norm_diagnosis}")
+        plt.title(f"Top 20 Regions ({diagnosis} vs {norm_diagnosis}) \n {name}")
         plt.xlabel("Cohen's d")
         plt.tight_layout()
         plt.savefig(f"{save_dir}/figures/top_regions_cohens_d_{diagnosis}_vs_{norm_diagnosis}.png", dpi=300, bbox_inches='tight')
         plt.close()
         
+    custom_palette = [
+        "#125E8A",  # Lapis Lazuli
+        "#3E885B",  # Sea Green  
+        "#BEDCFE",  # Uranian Blue
+        "#2F4B26",  # Cal Poly Green
+        "#A67DB8",  # Violet
+        "#160C28"   # Dark Purple
+    ]
+
     plt.figure(figsize=(10, 6))
+
+    # Zähler für Farben
+    color_idx = 0
+
     for diagnosis in diagnoses:
         if diagnosis == norm_diagnosis:
             continue
-        
+
         dx_effect_sizes = effect_sizes_df[effect_sizes_df["Diagnosis"] == diagnosis]
         if not dx_effect_sizes.empty:
-            sns.kdeplot(dx_effect_sizes["Cliffs_Delta"], label=diagnosis)
-    
+            color = custom_palette[color_idx % len(custom_palette)]
+            sns.kdeplot(dx_effect_sizes["Cliffs_Delta"], label=diagnosis, color=color)
+            color_idx += 1
+
     plt.axvline(x=0, color="black", linestyle="--", alpha=0.7)
-    plt.title(f"Distribution of Regional Effect Sizes vs {norm_diagnosis}")
+    plt.title(f"Distribution of Regional Effect Sizes vs {norm_diagnosis} \n {name}")
     plt.xlabel("Cliff's Delta")
     plt.legend()
     plt.tight_layout()  
     plt.savefig(f"{save_dir}/figures/effect_size_distributions_vs_{norm_diagnosis}.png", dpi=300, bbox_inches='tight')
     plt.close()
     
+   
+# 1. First calculate CTT-based top regions
+    if merge_ctt_groups:
+        ctt_effects = effect_sizes_df[effect_sizes_df["Diagnosis"] == "CTT"]
+    else:
+        ctt_effects = effect_sizes_df[effect_sizes_df["Diagnosis"].isin(["CTT-SCHZ", "CTT-MDD"])]
+
+    if not ctt_effects.empty:
+        if merge_ctt_groups:
+            ctt_top_regions = ctt_effects.sort_values("Abs_Cliffs_Delta", ascending=False).head(30)["ROI_Name"].values
+            print(f"Selected top 30 regions based on CTT effect sizes (n={len(ctt_effects)} regions)")
+        else:
+            ctt_region_avg = ctt_effects.groupby("ROI_Name")["Abs_Cliffs_Delta"].mean().reset_index()
+            ctt_top_regions = ctt_region_avg.sort_values("Abs_Cliffs_Delta", ascending=False).head(30)["ROI_Name"].values
+            print(f"Selected top 30 regions based on average CTT-SCHZ and CTT-MDD effect sizes")
+        
+        print(f"Top 30 CTT-affected regions: {ctt_top_regions[:10]}...")
+    else:
+        print("Warning: No CTT data found. Using empty list for CTT top regions.")
+        ctt_top_regions = []
+
+    # 2. Calculate overall averaged top regions (original method)
     region_avg_effects = effect_sizes_df.groupby("ROI_Name")["Abs_Cliffs_Delta"].mean().reset_index()
-    top_regions_overall = region_avg_effects.sort_values("Abs_Cliffs_Delta", ascending=False).head(30)["ROI_Name"].values
+    overall_top_regions = region_avg_effects.sort_values("Abs_Cliffs_Delta", ascending=False).head(30)["ROI_Name"].values
+    print(f"Top 30 overall averaged regions: {overall_top_regions[:10]}...")
 
-#---------------mit extended metadata subgroups-----------------------
-
-    # Create matrix of effect sizes for these regions including subgroups
+    # Create all heatmap data first
     heatmap_data = []
+    all_diagnoses = effect_sizes_df["Diagnosis"].unique()
 
-    # Get ALL diagnoses from the effect_sizes_df (includes original + subgroups)
-    all_diagnoses = effect_sizes_df["Diagnosis"].unique()  # This now includes subgroups
-    print(f"All diagnoses for heatmap: {all_diagnoses}")  # Debug print
-
-    for region in top_regions_overall:
+    # Create data for all regions (we'll filter later)
+    all_regions = effect_sizes_df["ROI_Name"].unique()
+    for region in all_regions:
         row = {"ROI_Name": region}
         for diagnosis in all_diagnoses:
-            if diagnosis == norm_diagnosis:  # Skip normative diagnosis
+            if diagnosis == norm_diagnosis:
                 continue
-                
             region_data = effect_sizes_df[(effect_sizes_df["ROI_Name"] == region) & 
                                         (effect_sizes_df["Diagnosis"] == diagnosis)]
             if not region_data.empty:
                 row[diagnosis] = region_data.iloc[0]["Cliffs_Delta"]
             else:
                 row[diagnosis] = np.nan
-        
         heatmap_data.append(row)
 
     heatmap_df = pd.DataFrame(heatmap_data)
     heatmap_df.set_index("ROI_Name", inplace=True)
-
-    # Remove columns that are all NaN (if any)
     heatmap_df = heatmap_df.dropna(axis=1, how='all')
 
-    if len(heatmap_df.columns) > 0:
-        # Adjust figure size based on number of columns
-        fig_width = max(12, len(heatmap_df.columns) * 1.5)
-        plt.figure(figsize=(fig_width, 14))
-        
-        # Create a mask for NaN values to show them differently
-        mask = heatmap_df.isna()
-        
-        sns.heatmap(heatmap_df, cmap="RdBu_r", center=0, annot=True, fmt=".2f", 
-                cbar_kws={"label": "Cliff's Delta"}, mask=mask)
-        plt.title(f"Top 30 Regions Effect Sizes vs {norm_diagnosis} (Including Subgroups)")
-        plt.xticks(rotation=45, ha='right')  # Rotate x-axis labels for better readability
-        plt.tight_layout()
-        plt.savefig(f"{save_dir}/figures/region_effect_heatmap_with_subgroups_vs_{norm_diagnosis}.png", dpi=300, bbox_inches='tight')
-        plt.close()
-        
-        # Save heatmap data
-        heatmap_df.to_csv(f"{save_dir}/top_regions_heatmap_data_with_subgroups_vs_{norm_diagnosis}.csv")
-        
-        print(f"Heatmap created with {len(heatmap_df.columns)} diagnosis groups (including subgroups)")
-        print(f"Diagnosis groups in heatmap: {list(heatmap_df.columns)}")
+    # HEATMAP 1: 3 Diagnoses with CTT Top 30 regions
+    print("\n=== Creating Heatmap 1: 3 Diagnoses with CTT Top 30 ===")
+    if merge_ctt_groups:
+        desired_diagnoses = ['MDD', 'SCHZ', 'CTT']
     else:
-        print("No data available for heatmap creation")
+        desired_diagnoses = ['MDD', 'SCHZ', 'CTT-SCHZ', 'CTT-MDD']
 
-    #---------------------heatmap condensed (only diagnosis)-----------------
-
-     # Create filtered heatmap with only MDD, SCHZ, CTT-SCHZ, CTT-MDD
-    desired_diagnoses = ['MDD', 'SCHZ', 'CTT-SCHZ', 'CTT-MDD']
-
-    # Filter the heatmap dataframe to only include desired columns that exist
     available_diagnoses = [diag for diag in desired_diagnoses if diag in heatmap_df.columns]
 
-    if len(available_diagnoses) > 0:
-        heatmap_filtered = heatmap_df[available_diagnoses].copy()
+    if len(available_diagnoses) > 0 and len(ctt_top_regions) > 0:
+        # Filter by CTT top regions
+        heatmap_ctt_regions = heatmap_df.loc[heatmap_df.index.isin(ctt_top_regions), available_diagnoses]
         
-        # Check if we have any data (not all NaN)
-        if not heatmap_filtered.isna().all().all():
-            # Adjust figure size for the filtered version - make it wider
-            fig_width = max(12, len(available_diagnoses) * 3)  # Increased base width and multiplier
-            plt.figure(figsize=(fig_width, 16))  # Also increased height slightly
+        if not heatmap_ctt_regions.empty and not heatmap_ctt_regions.isna().all().all():
+            fig_width = max(12, len(available_diagnoses) * 3)
+            plt.figure(figsize=(fig_width, 16))
             
-            # Create mask for NaN values
-            mask_filtered = heatmap_filtered.isna()
+            mask = heatmap_ctt_regions.isna()
+            sns.heatmap(heatmap_ctt_regions, cmap="RdBu_r", center=0, annot=True, fmt=".2f",
+                    cbar_kws={"label": "Cliff's Delta"}, mask=mask,
+                    square=False, linewidths=0.5)
             
-            # Create the filtered heatmap
-            sns.heatmap(heatmap_filtered, cmap="RdBu_r", center=0, annot=True, fmt=".2f",
-                    cbar_kws={"label": "Cliff's Delta"}, mask=mask_filtered,
-                    square=False, linewidths=0.5)  # Added square=False and linewidths for better appearance
-            plt.title(f"Top 30 Regions Effect Sizes vs {norm_diagnosis}\n(MDD, SCHZ, CTT-SCHZ, CTT-MDD)")
+            if merge_ctt_groups:
+                plt.title(f"Top 30 CTT-Affected Regions vs {norm_diagnosis}\n {name}")
+            else:
+                plt.title(f"Top 30 CTT-Affected Regions vs {norm_diagnosis}\n {name}")
+            
             plt.xticks(rotation=45, ha='right')
             plt.tight_layout()
-            plt.savefig(f"{save_dir}/figures/region_effect_heatmap_filtered_vs_{norm_diagnosis}.png", 
+            plt.savefig(f"{save_dir}/figures/heatmap_1_ctt_regions_3diagnoses_vs_{norm_diagnosis}.png", 
                     dpi=300, bbox_inches='tight')
             plt.close()
             
-            # Save filtered heatmap data
-            heatmap_filtered.to_csv(f"{save_dir}/top_regions_heatmap_data_filtered_vs_{norm_diagnosis}.csv")
-            
-            print(f"Filtered heatmap created with diagnoses: {available_diagnoses}")
+            heatmap_ctt_regions.to_csv(f"{save_dir}/heatmap_1_ctt_regions_3diagnoses_vs_{norm_diagnosis}.csv")
+            print(f"Heatmap 1 created: {heatmap_ctt_regions.shape[0]} regions, {len(available_diagnoses)} diagnoses")
         else:
-            print("No data available for filtered heatmap - all values are NaN")
+            print("No data available for Heatmap 1")
     else:
-        print(f"None of the desired diagnoses {desired_diagnoses} found in the data")
-        print(f"Available diagnoses in heatmap: {list(heatmap_df.columns)}")
+        print("Cannot create Heatmap 1 - missing diagnoses or CTT regions")
 
-    # Add this code after the filtered heatmap section in your analyze_regional_deviations function
+    # HEATMAP 2: 3 Diagnoses with Overall Top 30 regions
+    print("\n=== Creating Heatmap 2: 3 Diagnoses with Overall Top 30 ===")
+    if len(available_diagnoses) > 0:
+        # Filter by overall top regions
+        heatmap_overall_regions = heatmap_df.loc[heatmap_df.index.isin(overall_top_regions), available_diagnoses]
+        
+        if not heatmap_overall_regions.empty and not heatmap_overall_regions.isna().all().all():
+            fig_width = max(12, len(available_diagnoses) * 3)
+            plt.figure(figsize=(fig_width, 16))
+            
+            mask = heatmap_overall_regions.isna()
+            sns.heatmap(heatmap_overall_regions, cmap="RdBu_r", center=0, annot=True, fmt=".2f",
+                    cbar_kws={"label": "Cliff's Delta"}, mask=mask,
+                    square=False, linewidths=0.5)
+            
+            if merge_ctt_groups:
+                plt.title(f"Top 30 overall-Affected Regions vs {norm_diagnosis}\n {name}")
+            else:
+                plt.title(f"Top 30 overall-Affected Regions vs {norm_diagnosis}\n {name}")
+            
+            plt.xticks(rotation=45, ha='right')
+            plt.tight_layout()
+            plt.savefig(f"{save_dir}/figures/heatmap_2_overall_regions_3diagnoses_vs_{norm_diagnosis}.png", 
+                    dpi=300, bbox_inches='tight')
+            plt.close()
+            
+            heatmap_overall_regions.to_csv(f"{save_dir}/heatmap_2_overall_regions_3diagnoses_vs_{norm_diagnosis}.csv")
+            print(f"Heatmap 2 created: {heatmap_overall_regions.shape[0]} regions, {len(available_diagnoses)} diagnoses")
+        else:
+            print("No data available for Heatmap 2")
+    else:
+        print("Cannot create Heatmap 2 - missing diagnoses")
 
-        #---------------------heatmap with dataset split-----------------
-        # Ersetzen Sie den gesamten Abschnitt "heatmap with dataset split" mit diesem Code:
+    # HEATMAP 3: CTT Subgroups with CTT Top 30 regions (excluding SCHZ and MDD)
+    print("\n=== Creating Heatmap 3: CTT Subgroups with CTT Top 30 ===")
+    if len(ctt_top_regions) > 0:
+        # Filter by CTT top regions first
+        heatmap_subgroups = heatmap_df.loc[heatmap_df.index.isin(ctt_top_regions)]
+        
+        # Remove SCHZ and MDD columns
+        columns_to_exclude = ['SCHZ', 'MDD']
+        remaining_columns = [col for col in heatmap_subgroups.columns if col not in columns_to_exclude]
+        
+        if len(remaining_columns) > 0:
+            heatmap_subgroups = heatmap_subgroups[remaining_columns]
+            
+            if not heatmap_subgroups.empty and not heatmap_subgroups.isna().all().all():
+                fig_width = max(16, len(remaining_columns) * 1.5)
+                plt.figure(figsize=(fig_width, 16))
+                
+                mask = heatmap_subgroups.isna()
+                sns.heatmap(heatmap_subgroups, cmap="RdBu_r", center=0, annot=True, fmt=".2f", 
+                        cbar_kws={"label": "Cliff's Delta"}, mask=mask,
+                        linewidths=0.5)
+                
+                plt.title(f"Top Regions (CTT) vs {norm_diagnosis}\n{name}")
+                plt.xticks(rotation=45, ha='right')
+                plt.tight_layout()
+                plt.savefig(f"{save_dir}/figures/heatmap_3_ctt_subgroups_vs_{norm_diagnosis}.png", 
+                        dpi=300, bbox_inches='tight')
+                plt.close()
+                
+                heatmap_subgroups.to_csv(f"{save_dir}/heatmap_3_ctt_subgroups_vs_{norm_diagnosis}.csv")
+                print(f"Heatmap 3 created: {heatmap_subgroups.shape[0]} regions, {len(remaining_columns)} subgroups")
+                print(f"Subgroups included: {remaining_columns}")
+            else:
+                print("No data available for Heatmap 3")
+        else:
+            print("No remaining columns for Heatmap 3 after excluding SCHZ and MDD")
+    else:
+        print("Cannot create Heatmap 3 - no CTT top regions available")
 
-    #---------------------Dataset-Split Heatmap (Fixed Version)-----------------
+    print(f"\n=== Summary ===")
+    print(f"Heatmap 1: 3 main diagnoses with top 30 CTT-affected regions")
+    print(f"Heatmap 2: 3 main diagnoses with top 30 overall-affected regions") 
+    print(f"Heatmap 3: CTT subgroups only with top 30 CTT-affected regions")
+
+    if len(ctt_top_regions) > 0:
+        top_regions_overall = ctt_top_regions
+        print(f"Using CTT top regions for Dataset-Split Heatmap")
+    else:
+        top_regions_overall = overall_top_regions
+        print(f"Using overall top regions for Dataset-Split Heatmap")
+
+    #---------------------Dataset-Split Heatmap (Modified Version)-----------------
 
     print("Creating dataset-split heatmap...")
 
-    # Prüfen ob Dataset Spalte existiert
+    # Check if Dataset column exists
     if 'Dataset' not in results_df.columns:
         print("No 'Dataset' column found - skipping dataset-split heatmap")
     else:
-        # Dataset-Kategorien definieren (flexibel für verschiedene Schreibweisen)
+        # Define dataset categories (flexible for different spellings)
         available_datasets = results_df['Dataset'].unique()
         print(f"Available datasets: {available_datasets}")
         
@@ -1182,17 +1424,20 @@ def analyze_regional_deviations(
         
         print(f"Dataset categories: {dataset_categories}")
         
-        # Effect sizes für Dataset-Splits berechnen
+        # Calculate effect sizes for dataset splits
         dataset_split_effects = []
         
-        # Für jede Hauptdiagnose
-        main_diagnoses = ['SCHZ', 'MDD', 'CTT-SCHZ', 'CTT-MDD']
+        # MODIFIED: Use merged diagnosis groups
+        if merge_ctt_groups:
+            main_diagnoses = ['SCHZ', 'MDD', 'CTT']
+        else:
+            main_diagnoses = ['SCHZ', 'MDD', 'CTT-SCHZ', 'CTT-MDD']
         
         for diagnosis in main_diagnoses:
             if diagnosis == norm_diagnosis:
                 continue
                 
-            # Alle Patienten dieser Diagnose
+            # All patients of this diagnosis
             dx_data = results_df[results_df["Diagnosis"] == diagnosis]
             if dx_data.empty:
                 print(f"No data found for {diagnosis}")
@@ -1200,12 +1445,12 @@ def analyze_regional_deviations(
                 
             print(f"Processing {diagnosis} (total n={len(dx_data)})")
             
-            # Für jede Dataset-Kategorie
+            # For each dataset category
             for category_name, dataset_list in dataset_categories.items():
                 if not dataset_list:
                     continue
                     
-                # Daten für diese Kategorie filtern
+                # Filter data for this category
                 category_data = dx_data[dx_data['Dataset'].isin(dataset_list)]
                 
                 if category_data.empty:
@@ -1214,7 +1459,7 @@ def analyze_regional_deviations(
                     
                 print(f"  {diagnosis}-{category_name}: n={len(category_data)}")
                 
-                # Effect sizes für alle Regionen berechnen
+                # Calculate effect sizes for all regions
                 for i, region_col in enumerate(region_cols):
                     roi_name = roi_names[i] if i < len(roi_names) else f"Region_{i+1}"
                     
@@ -1224,7 +1469,7 @@ def analyze_regional_deviations(
                     if len(category_values) == 0 or len(norm_values) == 0:
                         continue
                     
-                    # Cliff's Delta berechnen
+                    # Calculate Cliff's Delta
                     cliff_delta = calculate_cliffs_delta(category_values, norm_values)
                     
                     dataset_split_effects.append({
@@ -1237,20 +1482,20 @@ def analyze_regional_deviations(
                     })
         
         if dataset_split_effects:
-            # DataFrame erstellen
+            # Create DataFrame
             dataset_effects_df = pd.DataFrame(dataset_split_effects)
             
-            # Pivot table für Heatmap erstellen
+            # Create pivot table for heatmap
             heatmap_dataset = dataset_effects_df.pivot(
                 index='ROI_Name', 
                 columns='Diagnosis_Dataset', 
                 values='Cliffs_Delta'
             )
             
-            # Nur top Regionen verwenden
+            # Use only top regions
             heatmap_dataset_top = heatmap_dataset[heatmap_dataset.index.isin(top_regions_overall)]
             
-            # Spalten in gewünschter Reihenfolge sortieren
+            # Sort columns in desired order
             column_order = []
             for diagnosis in main_diagnoses:
                 if diagnosis == norm_diagnosis:
@@ -1262,17 +1507,17 @@ def analyze_regional_deviations(
             
             heatmap_dataset_ordered = heatmap_dataset_top[column_order]
             
-            # Heatmap erstellen
+            # Create heatmap
             if not heatmap_dataset_ordered.empty and len(heatmap_dataset_ordered.columns) > 0:
                 fig_width = max(16, len(heatmap_dataset_ordered.columns) * 2.5)
                 fig_height = max(14, len(heatmap_dataset_ordered) * 0.4)
                 
                 fig, ax = plt.subplots(figsize=(fig_width, fig_height))
                 
-                # NaN Maske
+                # NaN mask
                 mask = heatmap_dataset_ordered.isna()
                 
-                # Heatmap plotten
+                # Plot heatmap
                 sns.heatmap(heatmap_dataset_ordered, 
                         cmap="RdBu_r", 
                         center=0, 
@@ -1283,16 +1528,16 @@ def analyze_regional_deviations(
                         linewidths=0.5,
                         ax=ax)
                 
-                # Titel und Labels
-                ax.set_title(f"Regional Effect Sizes vs {norm_diagnosis}\n(Split by Dataset: whiteCAT, NSS, others)", 
+                # Title and labels
+                ax.set_title(f"Regional Effect Sizes vs {norm_diagnosis}\n(Split by Dataset: whiteCAT, NSS, others) \n {name}", 
                             fontsize=16, pad=20)
                 ax.set_xlabel("Diagnosis-Dataset", fontsize=12)
                 ax.set_ylabel("Brain Region", fontsize=12)
                 
-                # X-Achse Labels rotieren
+                # Rotate x-axis labels
                 ax.set_xticklabels(ax.get_xticklabels(), rotation=45, ha='right')
                 
-                # Vertikale Linien zwischen Diagnosen hinzufügen
+                # Add vertical lines between diagnoses
                 col_positions = []
                 current_pos = 0
                 diagnosis_positions = {}
@@ -1307,26 +1552,26 @@ def analyze_regional_deviations(
                         current_pos += len(diagnosis_cols)
                         col_positions.append(current_pos)
                 
-                # Trennlinien zeichnen (außer nach der letzten Gruppe)
+                # Draw separator lines (except after last group)
                 for pos in col_positions[:-1]:
                     ax.axvline(x=pos, color='black', linewidth=2, alpha=0.8)
                 
                 plt.tight_layout()
                 
-                # Speichern
+                # Save
                 plt.savefig(f"{save_dir}/figures/region_effect_heatmap_dataset_split_vs_{norm_diagnosis}.png",
                         dpi=300, bbox_inches='tight')
                 plt.close()
                 
-                # Daten speichern
+                # Save data
                 heatmap_dataset_ordered.to_csv(f"{save_dir}/top_regions_heatmap_dataset_split_vs_{norm_diagnosis}.csv")
                 
-                # Zusammenfassung ausgeben
+                # Print summary
                 print(f"\nDataset-split heatmap created successfully!")
                 print(f"Shape: {heatmap_dataset_ordered.shape}")
                 print(f"Columns: {list(heatmap_dataset_ordered.columns)}")
                 
-                # Datenübersicht pro Spalte
+                # Data overview per column
                 print("\nData availability per column:")
                 for col in heatmap_dataset_ordered.columns:
                     non_nan = heatmap_dataset_ordered[col].notna().sum()
@@ -1334,7 +1579,7 @@ def analyze_regional_deviations(
                     pct = (non_nan/total*100) if total > 0 else 0
                     print(f"  {col}: {non_nan}/{total} regions ({pct:.1f}%)")
                     
-                # Sample size Übersicht
+                # Sample size overview
                 print("\nSample sizes per group:")
                 sample_sizes = dataset_effects_df.groupby('Diagnosis_Dataset')['N_Subjects'].first()
                 for group, n in sample_sizes.items():
@@ -1346,7 +1591,7 @@ def analyze_regional_deviations(
         else:
             print("No effect sizes calculated for dataset splits")
 
-        # Daten speichern
+        # Save data
         effect_sizes_df.to_csv(f"{save_dir}/effect_sizes_{norm_diagnosis}.csv")
             
         print(f"\nRegional analysis completed. Results saved to {save_dir}")
@@ -1361,392 +1606,127 @@ def analyze_regional_deviations(
 
 ######################################################## CORRELATION ANALYSIS ################################################################
 
-from statsmodels.stats.multitest import multipletests
 
-
-def analyze_score_correlations_with_corrections(results_df, metadata_df, save_dir, 
-                                               diagnoses_to_include=None,
-                                               correction_method='fdr_bh',
-                                               alpha=0.1):
+def create_corrected_correlation_heatmap(results_df, metadata_df, save_dir, name,
+                                       correction_method='fdr_bh',
+                                       alpha=0.05,
+                                       merge_ctt_groups=True):
     """
-    Analysiert Korrelationen mit verschiedenen Korrekturoptionen
+    Erstellt eine Heatmap mit korrigierten Korrelationen zwischen Deviation Scores 
+    der Patientengruppen und klinischen Scores
     
     Parameters:
     -----------
     results_df : DataFrame
         DataFrame mit Deviation Scores und Diagnosen
-    metadata_df : DataFrame  
-        DataFrame mit klinischen Scores
+    metadata_df : path 
     save_dir : str
-        Pfad zum Speichern der Ergebnisse
-    diagnoses_to_include : list, optional
-        Liste der zu inkludierenden Diagnosen
+        Pfad zum Speichern der Heatmap
     correction_method : str
-        Methode für multiple testing correction:
-        - 'bonferroni': Bonferroni correction
-        - 'fdr_bh': Benjamini-Hochberg FDR
-        - 'fdr_by': Benjamini-Yekutieli FDR
-        - 'holm': Holm-Sidak method
-        - None: keine Korrektur
+        'bonferroni', 'fdr_bh', 'fdr_by', 'holm'
     alpha : float
         Signifikanzlevel (default: 0.05)
+    merge_ctt_groups : bool
+        CTT-SCHZ und CTT-MDD zu CTT zusammenfassen (default: True)
     """
+    metadata_df = pd.read_csv(metadata_df)
+    # CTT Gruppen zusammenfassen falls gewünscht
+    if merge_ctt_groups:
+        results_df = results_df.copy()
+        metadata_df = metadata_df.copy()
+        results_df.loc[results_df['Diagnosis'].isin(['CTT-SCHZ', 'CTT-MDD']), 'Diagnosis'] = 'CTT'
+        metadata_df.loc[metadata_df['Diagnosis'].isin(['CTT-SCHZ', 'CTT-MDD']), 'Diagnosis'] = 'CTT'
+        print("CTT-SCHZ und CTT-MDD zu CTT zusammengefasst")
     
     # Merge der DataFrames
     merged_data = pd.merge(results_df, metadata_df, on='Filename', how='inner')
-    print(f"Merged data shape: {merged_data.shape}")
-    
-    # Bereinigung der Spaltennamen nach dem Merge
     merged_data = merged_data.rename(columns={'Age_x': 'Age', 'Sex_x': 'Sex', 'Dataset_x': 'Dataset'})
     
-    # Filtere nach gewünschten Diagnosen
-    if diagnoses_to_include:
-        merged_data = merged_data[merged_data['Diagnosis_x'].isin(diagnoses_to_include)]
-        print(f"Filtered to diagnoses {diagnoses_to_include}. New shape: {merged_data.shape}")
+    # Nur Patientengruppen (keine HC)
+    patient_data = merged_data[merged_data['Diagnosis_x'] != 'HC']
     
-    # Definiere die Score-Spalten
+    # Definiere Score-Spalten
     score_columns = ['GAF_Score', 'PANSS_Positive', 'PANSS_Negative', 
                      'PANSS_General', 'PANSS_Total', 'BPRS_Total', 
                      'NCRS_Motor', 'NCRS_Affective', 'NCRS_Behavioral', 
                      'NCRS_Total', 'NSS_Motor', 'NSS_Total']
     
-    # Filtere nur vorhandene Score-Spalten
-    available_scores = [col for col in score_columns if col in merged_data.columns]
-    print(f"Available score columns: {available_scores}")
+    # Filtere verfügbare Scores
+    available_scores = [col for col in score_columns if col in patient_data.columns]
     
-    deviation_metric = 'deviation_score'
+    # Patientengruppen identifizieren
+    diagnoses = [d for d in patient_data['Diagnosis_x'].unique() if d != 'HC']
     
-    # Erstelle Ausgabeverzeichnis
-    import os
-    os.makedirs(f"{save_dir}/figures/correlations", exist_ok=True)
+    print(f"Analysiere Korrelationen für {len(diagnoses)} Patientengruppen und {len(available_scores)} Scores")
+    print(f"Patientengruppen: {diagnoses}")
+    print(f"Verfügbare Scores: {available_scores}")
     
-    # 1. BERECHNE ALLE KORRELATIONEN
-    correlation_results = calculate_correlations_with_corrections(
-        merged_data, available_scores, deviation_metric, correction_method, alpha
-    )
+    # Korrelationen berechnen
+    correlation_matrix = np.full((len(diagnoses), len(available_scores)), np.nan)
+    p_value_matrix = np.full((len(diagnoses), len(available_scores)), np.nan)
     
-    # 2. VISUALISIERUNGEN
-    plot_correlation_heatmap_with_corrections(
-        correlation_results, available_scores, deviation_metric, save_dir, correction_method
-    )
-    
-    # 3. DIAGNOSE-SPEZIFISCHE KORRELATIONEN
-    if 'Diagnosis_x' in merged_data.columns:
-        diagnosis_results = analyze_diagnosis_correlations_with_corrections(
-            merged_data, available_scores, deviation_metric, save_dir, correction_method, alpha
-        )
-    
-    # 4. ZUSAMMENFASSUNGSTABELLEN
-    create_corrected_summary_tables(correlation_results, save_dir, correction_method)
-    
-    return correlation_results, merged_data
-
-def calculate_correlations_with_corrections(merged_data, score_columns, deviation_metric, 
-                                          correction_method, alpha):
-    """Berechnet Korrelationen mit verschiedenen Korrekturen"""
-    
-    correlations = {}
     all_p_values = []
-    all_tests = []
+    correlation_info = []
     
-    print(f"\n=== Analyzing correlations for {deviation_metric} ===")
-    
-    # Sammle alle p-Werte für multiple testing correction
-    for score in score_columns:
-        valid_data = merged_data[[deviation_metric, score]].dropna()
+    for i, diagnosis in enumerate(diagnoses):
+        diag_data = patient_data[patient_data['Diagnosis_x'] == diagnosis]
         
-        if len(valid_data) < 10:
-            print(f"Insufficient data for {score} (n={len(valid_data)})")
-            continue
+        for j, score in enumerate(available_scores):
+            valid_data = diag_data[['deviation_score', score]].dropna()
             
-        # Berechne Korrelationen
-        pearson_r, pearson_p = pearsonr(valid_data[deviation_metric], valid_data[score])
-        spearman_r, spearman_p = spearmanr(valid_data[deviation_metric], valid_data[score])
-        
-        correlations[score] = {
-            'n': len(valid_data),
-            'pearson_r': pearson_r,
-            'pearson_p': pearson_p,
-            'spearman_r': spearman_r,
-            'spearman_p': spearman_p,
-            'valid_data': valid_data
-        }
-        
-        # Sammle p-Werte für Korrektur
-        all_p_values.extend([pearson_p, spearman_p])
-        all_tests.extend([(score, 'pearson'), (score, 'spearman')])
+            if len(valid_data) >= 3:  # Mindestens 3 Datenpunkte
+                r, p = pearsonr(valid_data['deviation_score'], valid_data[score])
+                correlation_matrix[i, j] = r
+                p_value_matrix[i, j] = p
+                all_p_values.append(p)
+                correlation_info.append((i, j, diagnosis, score, len(valid_data), r, p))
     
-    # Multiple testing correction
-    if correction_method and len(all_p_values) > 0:
-        print(f"\nApplying {correction_method} correction to {len(all_p_values)} tests...")
-        
-        rejected, corrected_p_values, alpha_sidak, alpha_bonf = multipletests(
+    # Multiple Testing Correction
+    if len(all_p_values) > 0:
+        rejected, corrected_p_values, _, _ = multipletests(
             all_p_values, alpha=alpha, method=correction_method
         )
         
-        # Füge korrigierte p-Werte zu den Ergebnissen hinzu
-        for i, (score, test_type) in enumerate(all_tests):
-            if score in correlations:
-                correlations[score][f'{test_type}_p_corrected'] = corrected_p_values[i]
-                correlations[score][f'{test_type}_significant_corrected'] = rejected[i]
+        # Korrigierte p-Werte in Matrix einsetzen
+        corrected_p_matrix = np.full((len(diagnoses), len(available_scores)), np.nan)
+        significance_matrix = np.full((len(diagnoses), len(available_scores)), False)
         
-        print(f"Correction applied. Effective alpha: {alpha_bonf:.6f}")
+        for idx, (i, j, diagnosis, score, n, r, p) in enumerate(correlation_info):
+            corrected_p_matrix[i, j] = corrected_p_values[idx]
+            significance_matrix[i, j] = rejected[idx]
     
-    # Ausgabe der Ergebnisse
-    for score, results in correlations.items():
-        print(f"\n{score}:")
-        print(f"  n={results['n']}")
-        print(f"  Pearson: r={results['pearson_r']:.3f}, p={results['pearson_p']:.3f}", end="")
-        if correction_method:
-            print(f", p_corr={results['pearson_p_corrected']:.3f} {'*' if results['pearson_significant_corrected'] else ''}")
-        else:
-            print("")
-        
-        print(f"  Spearman: r={results['spearman_r']:.3f}, p={results['spearman_p']:.3f}", end="")
-        if correction_method:
-            print(f", p_corr={results['spearman_p_corrected']:.3f} {'*' if results['spearman_significant_corrected'] else ''}")
-        else:
-            print("")
-    
-    return {deviation_metric: correlations}
-
-def plot_correlation_heatmap_with_corrections(correlation_results, score_columns, 
-                                            deviation_metric, save_dir, correction_method):
-    """Erstellt Heatmaps mit und ohne Korrektur"""
-    
-    def create_correlation_matrices(use_corrected=False):
-        pearson_values = []
-        spearman_values = []
-        pearson_p_values = []
-        spearman_p_values = []
-        
-        p_suffix = '_corrected' if use_corrected else ''
-        
-        for score in score_columns:
-            if score in correlation_results[deviation_metric]:
-                pearson_values.append(correlation_results[deviation_metric][score]['pearson_r'])
-                spearman_values.append(correlation_results[deviation_metric][score]['spearman_r'])
-                
-                pearson_p_key = f'pearson_p{p_suffix}'
-                spearman_p_key = f'spearman_p{p_suffix}'
-                
-                pearson_p_values.append(correlation_results[deviation_metric][score].get(pearson_p_key, 
-                                       correlation_results[deviation_metric][score]['pearson_p']))
-                spearman_p_values.append(correlation_results[deviation_metric][score].get(spearman_p_key,
-                                        correlation_results[deviation_metric][score]['spearman_p']))
+    # Annotationen erstellen
+    annotations = []
+    for i in range(len(diagnoses)):
+        row_annotations = []
+        for j in range(len(available_scores)):
+            if np.isnan(correlation_matrix[i, j]):
+                row_annotations.append('')
             else:
-                pearson_values.append(np.nan)
-                spearman_values.append(np.nan)
-                pearson_p_values.append(np.nan)
-                spearman_p_values.append(np.nan)
-        
-        return (np.array(pearson_values).reshape(1, -1),
-                np.array(spearman_values).reshape(1, -1),
-                np.array(pearson_p_values).reshape(1, -1),
-                np.array(spearman_p_values).reshape(1, -1))
-    
-    def create_annotations(corr_matrix, p_matrix):
-        annotations = []
-        for i in range(corr_matrix.shape[0]):
-            row_annotations = []
-            for j in range(corr_matrix.shape[1]):
-                if np.isnan(corr_matrix[i, j]):
-                    row_annotations.append('')
-                else:
-                    corr_val = corr_matrix[i, j]
-                    p_val = p_matrix[i, j]
-                    
-                    if p_val < 0.001:
-                        stars = '***'
-                    elif p_val < 0.01:
-                        stars = '**'
-                    elif p_val < 0.05:
-                        stars = '*'
-                    else:
-                        stars = ''
-                    
-                    annotation = f'{corr_val:.3f}{stars}'
-                    row_annotations.append(annotation)
-            annotations.append(row_annotations)
-        return annotations
-    
-    # Plot ohne Korrektur
-    pearson_matrix, spearman_matrix, pearson_p_matrix, spearman_p_matrix = create_correlation_matrices(False)
-    
-    # Pearson ohne Korrektur
-    plt.figure(figsize=(14, 4))
-    mask = np.isnan(pearson_matrix)
-    pearson_annotations = create_annotations(pearson_matrix, pearson_p_matrix)
-    
-    sns.heatmap(pearson_matrix, 
-                xticklabels=score_columns,
-                yticklabels=[deviation_metric.replace('_', ' ').title()],
-                annot=pearson_annotations,
-                fmt='',
-                cmap='RdBu_r', 
-                center=0,
-                mask=mask,
-                square=False,
-                cbar_kws={'label': 'Pearson Correlation Coefficient'})
-    
-    plt.title('Pearson Correlations (Uncorrected)\n(* p<0.05, ** p<0.01, *** p<0.001)', fontsize=14)
-    plt.xlabel('Clinical Scores', fontsize=12)
-    plt.xticks(rotation=45, ha='right')
-    plt.tight_layout()
-    plt.savefig(f"{save_dir}/figures/correlations/pearson_correlation_uncorrected.png", dpi=300, bbox_inches='tight')
-    plt.close()
-    
-    # Plot mit Korrektur (falls verfügbar)
-    if correction_method:
-        pearson_matrix_corr, spearman_matrix_corr, pearson_p_matrix_corr, spearman_p_matrix_corr = create_correlation_matrices(True)
-        
-        # Pearson mit Korrektur
-        plt.figure(figsize=(14, 4))
-        mask = np.isnan(pearson_matrix_corr)
-        pearson_annotations_corr = create_annotations(pearson_matrix_corr, pearson_p_matrix_corr)
-        
-        sns.heatmap(pearson_matrix_corr, 
-                    xticklabels=score_columns,
-                    yticklabels=[deviation_metric.replace('_', ' ').title()],
-                    annot=pearson_annotations_corr,
-                    fmt='',
-                    cmap='RdBu_r', 
-                    center=0,
-                    mask=mask,
-                    square=False,
-                    cbar_kws={'label': 'Pearson Correlation Coefficient'})
-        
-        plt.title(f'Pearson Correlations ({correction_method.upper()} Corrected)\n(* p<0.05, ** p<0.01, *** p<0.001)', fontsize=14)
-        plt.xlabel('Clinical Scores', fontsize=12)
-        plt.xticks(rotation=45, ha='right')
-        plt.tight_layout()
-        plt.savefig(f"{save_dir}/figures/correlations/pearson_correlation_{correction_method}_corrected.png", dpi=300, bbox_inches='tight')
-        plt.close()
-
-def analyze_diagnosis_correlations_with_corrections(merged_data, score_columns, deviation_metric, 
-                                                  save_dir, correction_method, alpha):
-    """Analysiert Korrelationen nach Diagnosen mit Korrekturen"""
-    
-    # Filtere HC aus
-    diagnoses = [d for d in merged_data['Diagnosis_x'].unique() if d != 'HC']
-    
-    diagnosis_results = {}
-    
-    for diagnosis in diagnoses:
-        diag_data = merged_data[merged_data['Diagnosis_x'] == diagnosis]
-        
-        if len(diag_data) < 10:
-            continue
-        
-        print(f"\n=== Analyzing correlations for {diagnosis} (n={len(diag_data)}) ===")
-        
-        # Berechne Korrelationen für diese Diagnose
-        correlations = {}
-        all_p_values = []
-        all_tests = []
-        
-        for score in score_columns:
-            if score not in diag_data.columns:
-                continue
+                r_val = correlation_matrix[i, j]
+                p_val = corrected_p_matrix[i, j]
                 
-            valid_data = diag_data[[deviation_metric, score]].dropna()
-            
-            if len(valid_data) < 5:
-                continue
-                
-            pearson_r, pearson_p = pearsonr(valid_data[deviation_metric], valid_data[score])
-            spearman_r, spearman_p = spearmanr(valid_data[deviation_metric], valid_data[score])
-            
-            correlations[score] = {
-                'n': len(valid_data),
-                'pearson_r': pearson_r,
-                'pearson_p': pearson_p,
-                'spearman_r': spearman_r,
-                'spearman_p': spearman_p
-            }
-            
-            all_p_values.extend([pearson_p, spearman_p])
-            all_tests.extend([(score, 'pearson'), (score, 'spearman')])
-        
-        # Multiple testing correction für diese Diagnose
-        if correction_method and len(all_p_values) > 0:
-            rejected, corrected_p_values, _, _ = multipletests(
-                all_p_values, alpha=alpha, method=correction_method
-            )
-            
-            for i, (score, test_type) in enumerate(all_tests):
-                if score in correlations:
-                    correlations[score][f'{test_type}_p_corrected'] = corrected_p_values[i]
-                    correlations[score][f'{test_type}_significant_corrected'] = rejected[i]
-        
-        diagnosis_results[diagnosis] = correlations
-    
-    # Erstelle kombinierte Plots mit Korrekturen
-    if diagnosis_results:
-        create_combined_diagnosis_heatmap_with_corrections(
-            diagnosis_results, list(diagnosis_results.keys()), score_columns, 
-            deviation_metric, save_dir, correction_method
-        )
-    
-    return diagnosis_results
-
-def create_combined_diagnosis_heatmap_with_corrections(diagnosis_correlations, diagnoses, 
-                                                     score_columns, deviation_metric, 
-                                                     save_dir, correction_method):
-    """Erstellt kombinierte Heatmaps mit und ohne Korrektur"""
-    
-    def create_diagnosis_matrices(use_corrected=False):
-        correlation_matrix = np.full((len(diagnoses), len(score_columns)), np.nan)
-        p_value_matrix = np.full((len(diagnoses), len(score_columns)), np.nan)
-        
-        p_suffix = '_corrected' if use_corrected else ''
-        
-        for i, diagnosis in enumerate(diagnoses):
-            for j, score in enumerate(score_columns):
-                if score in diagnosis_correlations[diagnosis]:
-                    correlation_matrix[i, j] = diagnosis_correlations[diagnosis][score]['pearson_r']
-                    
-                    p_key = f'pearson_p{p_suffix}'
-                    p_value_matrix[i, j] = diagnosis_correlations[diagnosis][score].get(
-                        p_key, diagnosis_correlations[diagnosis][score]['pearson_p']
-                    )
-        
-        return correlation_matrix, p_value_matrix
-    
-    def create_annotations(corr_matrix, p_matrix):
-        annotations = []
-        for i in range(len(diagnoses)):
-            row_annotations = []
-            for j in range(len(score_columns)):
-                if np.isnan(corr_matrix[i, j]):
-                    row_annotations.append('')
+                # Signifikanz-Sterne basierend auf korrigierten p-Werten
+                if p_val < 0.001:
+                    stars = '***'
+                elif p_val < 0.01:
+                    stars = '**'
+                elif p_val < alpha:
+                    stars = '*'
                 else:
-                    corr_val = corr_matrix[i, j]
-                    p_val = p_matrix[i, j]
-                    
-                    if p_val < 0.001:
-                        stars = '***'
-                    elif p_val < 0.01:
-                        stars = '**'
-                    elif p_val < 0.05:
-                        stars = '*'
-                    else:
-                        stars = ''
-                    
-                    annotation = f'{corr_val:.2f}{stars}'
-                    row_annotations.append(annotation)
-            annotations.append(row_annotations)
-        return annotations
+                    stars = ''
+                
+                annotation = f'{r_val:.2f}{stars}'
+                row_annotations.append(annotation)
+        annotations.append(row_annotations)
     
-    # Plot ohne Korrektur
-    correlation_matrix, p_value_matrix = create_diagnosis_matrices(False)
-    
+    # Heatmap erstellen
     plt.figure(figsize=(16, max(6, len(diagnoses) * 0.8)))
+    
     mask = np.isnan(correlation_matrix)
-    annotations = create_annotations(correlation_matrix, p_value_matrix)
     
     sns.heatmap(correlation_matrix,
-                xticklabels=score_columns,
+                xticklabels=available_scores,
                 yticklabels=diagnoses,
                 annot=annotations,
                 fmt='',
@@ -1758,139 +1738,38 @@ def create_combined_diagnosis_heatmap_with_corrections(diagnosis_correlations, d
                 linewidths=0.5,
                 linecolor='white')
     
-    plt.title(f'Correlations by Patient Groups (Uncorrected)\n(* p<0.05, ** p<0.01, *** p<0.001)', 
+    plt.title(f'Deviation Score Correlations - {name}\n'
+              f'({correction_method.upper()} Corrected, α={alpha})\n'
+              f'(* p<{alpha}, ** p<0.01, *** p<0.001)', 
               fontsize=14, pad=20)
     plt.xlabel('Clinical Scores', fontsize=12)
-    plt.ylabel('Patient Groups', fontsize=12)
     plt.xticks(rotation=45, ha='right')
     plt.yticks(rotation=0)
     plt.tight_layout()
-    plt.savefig(f"{save_dir}/figures/correlations/diagnosis_correlations_uncorrected.png", 
-                dpi=300, bbox_inches='tight')
-    plt.close()
     
-    # Plot mit Korrektur
-    if correction_method:
-        correlation_matrix_corr, p_value_matrix_corr = create_diagnosis_matrices(True)
-        
-        plt.figure(figsize=(16, max(6, len(diagnoses) * 0.8)))
-        mask = np.isnan(correlation_matrix_corr)
-        annotations_corr = create_annotations(correlation_matrix_corr, p_value_matrix_corr)
-        
-        sns.heatmap(correlation_matrix_corr,
-                    xticklabels=score_columns,
-                    yticklabels=diagnoses,
-                    annot=annotations_corr,
-                    fmt='',
-                    cmap='RdBu_r',
-                    center=0,
-                    mask=mask,
-                    square=False,
-                    cbar_kws={'label': 'Pearson Correlation Coefficient'},
-                    linewidths=0.5,
-                    linecolor='white')
-        
-        plt.title(f'Correlations by Patient Groups ({correction_method.upper()} Corrected)\n(* p<0.05, ** p<0.01, *** p<0.001)', 
-                  fontsize=14, pad=20)
-        plt.xlabel('Clinical Scores', fontsize=12)
-        plt.ylabel('Patient Groups', fontsize=12)
-        plt.xticks(rotation=45, ha='right')
-        plt.yticks(rotation=0)
-        plt.tight_layout()
-        plt.savefig(f"{save_dir}/figures/correlations/diagnosis_correlations_{correction_method}_corrected.png", 
-                    dpi=300, bbox_inches='tight')
-        plt.close()
-
-def create_corrected_summary_tables(correlation_results, save_dir, correction_method):
-    """Erstellt Zusammenfassungstabellen mit Korrekturen"""
+    # Speichern
+    import os
+    os.makedirs(f"{save_dir}/figures", exist_ok=True)
+    filename = f"{save_dir}/figures/patient_correlations_{correction_method}_corrected.png"
+    plt.savefig(filename, dpi=300, bbox_inches='tight')
+    plt.show()
     
-    summary_data = []
+    # Zusammenfassung ausgeben
+    total_tests = len([p for p in all_p_values if not np.isnan(p)])
+    significant_corrected = np.sum(significance_matrix)
     
-    for dev_metric, scores in correlation_results.items():
-        for score, results in scores.items():
-            row = {
-                'Deviation_Metric': dev_metric,
-                'Clinical_Score': score,
-                'N': results['n'],
-                'Pearson_r': results['pearson_r'],
-                'Pearson_p': results['pearson_p'],
-                'Spearman_r': results['spearman_r'],
-                'Spearman_p': results['spearman_p']
-            }
-            
-            # Füge korrigierte Werte hinzu falls verfügbar
-            if correction_method:
-                row.update({
-                    'Pearson_p_corrected': results.get('pearson_p_corrected', np.nan),
-                    'Spearman_p_corrected': results.get('spearman_p_corrected', np.nan),
-                    'Pearson_significant_corrected': results.get('pearson_significant_corrected', False),
-                    'Spearman_significant_corrected': results.get('spearman_significant_corrected', False)
-                })
-            
-            summary_data.append(row)
+    print(f"\n=== ZUSAMMENFASSUNG ===")
+    print(f"Gesamte Tests: {total_tests}")
+    print(f"Signifikante Korrelationen (korrigiert): {significant_corrected}")
+    print(f"Korrekturmethode: {correction_method}")
+    print(f"Alpha-Level: {alpha}")
+    print(f"Heatmap gespeichert: {filename}")
     
-    summary_df = pd.DataFrame(summary_data)
-    summary_df = summary_df.sort_values('Pearson_p')
+    # Detaillierte Ergebnisse für signifikante Korrelationen
+    print(f"\n=== SIGNIFIKANTE KORRELATIONEN ===")
+    for idx, (i, j, diagnosis, score, n, r, p_orig) in enumerate(correlation_info):
+        if significance_matrix[i, j]:
+            p_corr = corrected_p_matrix[i, j]
+            print(f"{diagnosis} - {score}: r={r:.3f}, p_orig={p_orig:.3f}, p_corr={p_corr:.3f}, n={n}")
     
-    # Speichere Tabelle
-    filename = f"correlation_summary{'_' + correction_method if correction_method else ''}.csv"
-    summary_df.to_csv(f"{save_dir}/figures/correlations/{filename}", index=False)
-    
-    # Zeige Ergebnisse
-    print(f"\n=== CORRELATION SUMMARY ===")
-    if correction_method:
-        print(f"Multiple testing correction: {correction_method}")
-        sig_uncorrected = sum(summary_df['Pearson_p'] < 0.05)
-        sig_corrected = sum(summary_df['Pearson_significant_corrected'])
-        print(f"Significant correlations: {sig_uncorrected} uncorrected, {sig_corrected} corrected")
-    else:
-        sig_uncorrected = sum(summary_df['Pearson_p'] < 0.05)
-        print(f"Significant correlations: {sig_uncorrected}")
-    
-    return summary_df
-
-# HAUPTFUNKTION MIT KORREKTUROPTIONEN
-def run_correlation_analysis(results_df, save_dir, 
-                                            correction_method='fdr_bh',
-                                            metadata_path=None, 
-                                            diagnoses_to_include=None,
-                                            alpha=0.1):
-    """
-    Hauptfunktion für Korrelationsanalyse mit Korrekturen
-    
-    Parameters:
-    -----------
-    results_df : DataFrame
-        Deine results DataFrame mit Deviation Scores
-    save_dir : str
-        Pfad zum Speichern
-    correction_method : str
-        'bonferroni', 'fdr_bh', 'fdr_by', 'holm', oder None
-    metadata_path : str, optional
-        Pfad zur Metadaten-CSV
-    diagnoses_to_include : list, optional
-        Liste der Diagnosen zum Einschließen
-    alpha : float
-        Signifikanzlevel (default: 0.05)
-    """
-    
-    # Lade Metadaten
-    if metadata_path:
-        metadata_df = pd.read_csv(metadata_path)
-    else:
-        metadata_df = pd.read_csv('/workspace/project/catatonia_VAE-main_bq/metadata_20250110/full_data_with_codiagnosis_and_scores.csv')
-    
-    # Führe Analyse durch
-    correlation_results, merged_data = analyze_score_correlations_with_corrections(
-        results_df=results_df,
-        metadata_df=metadata_df, 
-        save_dir=save_dir,
-        diagnoses_to_include=diagnoses_to_include,
-        correction_method=correction_method,
-        alpha=alpha
-    )
-    
-    print(f"\nAnalysis completed with correction method: {correction_method}")
-    print(f"Results saved to: {save_dir}/figures/correlations/")
-    
-    return correlation_results, merged_data
+    return correlation_matrix, corrected_p_matrix, significance_matrix

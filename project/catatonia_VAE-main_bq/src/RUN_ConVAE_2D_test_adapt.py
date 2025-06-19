@@ -33,7 +33,8 @@ from utils.dev_scores_utils import (
     extract_roi_names,
     save_latent_visualizations,
     visualize_embeddings_multiple,
-    run_correlation_analysis
+    create_corrected_correlation_heatmap,
+    run_analysis_with_options
 )
 
 def main(args):
@@ -93,11 +94,13 @@ def main(args):
             volume_type = eval(volume_type)  # Convert string representation to list
         elif volume_type.startswith('"[') and volume_type.endswith(']"'):
             volume_type = eval(volume_type.strip('"'))
+        if isinstance(volume_type, str):
+            volume_type = [volume_type]
 
         valid_volume_types = eval(config_df["VALID_VOLUME_TYPES"].iloc[0]) if "VALID_VOLUME_TYPES" in config_df.columns else ["Vgm", "Vwm", "Vcsf"]
         metadata_test = config_df["TEST_CSV"].iloc[0] if "TEST_CSV" in config_df.columns else args.clinical_csv
         mri_data_path = config_df["MRI_DATA_PATH"].iloc[0] if "MRI_DATA_PATH" in config_df.columns else None
-        
+        atlas_volume_string = f"{'/'.join(atlas_name)} - {'/'.join(volume_type)}"
         hidden_dim_1 = 100  # Default
         hidden_dim_2 = 100  # Default
         
@@ -223,12 +226,28 @@ def main(args):
         annotations_df=annotations_dev,
         device=device
     )
-    correlation_results, merged_data = run_correlation_analysis(
+    custom_colors = {
+        "HC": "#125E8A",     # Lapis Lazulli
+        "SCHZ": "#3E885B",    # Sea Green  
+        "MDD": "#BEDCFE",     # Uranian Blue
+        "CTT": "#2F4B26",      # Cal Poly Green
+        "CTT-SCHZ": "#A67DB8", # Indian Red
+        "CTT-MDD": "#160C28"   # Dark Purple
+    }
+
+    run_analysis_with_options(results_df, save_dir, True, "HC", 
+                            split_ctt=False, custom_colors=custom_colors, name = atlas_volume_string)
+    
+    correlation_matrix, p_matrix, sig_matrix = create_corrected_correlation_heatmap(
         results_df=results_df,
+        metadata_df='/workspace/project/catatonia_VAE-main_bq/metadata_20250110/full_data_with_codiagnosis_and_scores.csv', 
         save_dir=save_dir,
-        correction_method='fdr_bh',  # oder 'bonferroni', 'holm', etc.
-        alpha=0.05
+        correction_method='fdr_bh',
+        alpha=0.05,
+        merge_ctt_groups=True, 
+        name = atlas_volume_string
     )
+
     # Map ROI names to region columns if we have them
     if roi_names is not None:
         region_cols = [col for col in results_df.columns if col.startswith("region_")]
@@ -248,7 +267,7 @@ def main(args):
     
     log_and_print_test("Generating visualizations...")
     
-    plot_deviation_distributions(results_df, save_dir, norm_diagnosis=norm_diagnosis, col_jitter=True)
+    plot_deviation_distributions(results_df, save_dir, norm_diagnosis=norm_diagnosis, col_jitter=True, name = atlas_volume_string)
     log_and_print_test("Plotted deviation distributions")
     
     # Visualize embeddings in latent space
@@ -279,9 +298,11 @@ def main(args):
             clinical_data_path=h5_file_path,
             volume_type=volume_type,
             atlas_name=atlas_name,
+            name= atlas_volume_string,
             roi_names=roi_names,
             norm_diagnosis=norm_diagnosis,
             add_catatonia_subgroups=True,
+            merge_ctt_groups=True,
             metadata_path='/workspace/project/catatonia_VAE-main_bq/metadata_20250110/full_data_with_codiagnosis_and_scores.csv',
             subgroup_columns=['GAF_Score', 'PANSS_Positive', 'PANSS_Negative', 
                                     'PANSS_General', 'PANSS_Total', 'BPRS_Total', 'NCRS_Motor', 
@@ -299,7 +320,7 @@ def main(args):
                                 'NSS_Motor':10, #minimum = 0, maximum = ?
                                 'NSS_Total':25} #minimum = 0, maximum = 19 ??geht bei uns höher?
         )
-
+       
         # Save heatmap data
         regional_results.to_csv(f"{save_dir}/effect_sizes_{norm_diagnosis}.csv")
         
