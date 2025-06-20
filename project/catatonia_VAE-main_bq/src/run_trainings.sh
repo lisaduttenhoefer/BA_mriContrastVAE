@@ -72,10 +72,10 @@ fi
 # python /workspace/project/catatonia_VAE-main_bq/src/run_ConVAE_2D_train_adapt.py --atlas_name lpba40 --volume_type Vgm Vwm Vcsf --norm_diagnosis "SCHZ"
 
 # Vgm  neuromorphometrics lpba40	SCHZ
-python /workspace/project/catatonia_VAE-main_bq/src/run_ConVAE_2D_train_adapt.py --atlas_name neuromorphometrics lpba40 --volume_type Vgm  --norm_diagnosis "SCHZ"
+# python /workspace/project/catatonia_VAE-main_bq/src/run_ConVAE_2D_train_adapt.py --atlas_name neuromorphometrics lpba40 --volume_type Vgm  --norm_diagnosis "SCHZ"
 
-# Vgm, Vwm, Vcsf  neuromorphometrics lpba40	SCHZ
-python /workspace/project/catatonia_VAE-main_bq/src/run_ConVAE_2D_train_adapt.py --atlas_name neuromorphometrics lpba40 --volume_type Vgm Vwm Vcsf --norm_diagnosis "SCHZ"
+# # Vgm, Vwm, Vcsf  neuromorphometrics lpba40	SCHZ
+# python /workspace/project/catatonia_VAE-main_bq/src/run_ConVAE_2D_train_adapt.py --atlas_name neuromorphometrics lpba40 --volume_type Vgm Vwm Vcsf --norm_diagnosis "SCHZ"
 
 # # Vgm	all	SCHZ
 # python /workspace/project/catatonia_VAE-main_bq/src/run_ConVAE_2D_train_adapt.py --atlas_name all --volume_type Vgm --norm_diagnosis "SCHZ"
@@ -119,11 +119,11 @@ python /workspace/project/catatonia_VAE-main_bq/src/run_ConVAE_2D_train_adapt.py
 # # Vgm, Vwm, Vcsf	all	MDD
 # python /workspace/project/catatonia_VAE-main_bq/src/run_ConVAE_2D_train_adapt.py --atlas_name all --volume_type Vgm Vwm Vcsf --norm_diagnosis "MDD"
 
-# # Vgm  neuromorphometrics lpba40	MDD
-# python /workspace/project/catatonia_VAE-main_bq/src/run_ConVAE_2D_train_adapt.py --atlas_name neuromorphometrics lpba40 --volume_type Vgm  --norm_diagnosis "MDD"
+# Vgm  neuromorphometrics lpba40	MDD
+python /workspace/project/catatonia_VAE-main_bq/src/run_ConVAE_2D_train_adapt.py --atlas_name neuromorphometrics lpba40 --volume_type Vgm  --norm_diagnosis "MDD"
 
-# # Vgm, Vwm, Vcsf  neuromorphometrics lpba40	MDD
-# python /workspace/project/catatonia_VAE-main_bq/src/run_ConVAE_2D_train_adapt.py --atlas_name neuromorphometrics lpba40 --volume_type Vgm Vwm Vcsf --norm_diagnosis "MDD"
+# Vgm, Vwm, Vcsf  neuromorphometrics lpba40	MDD
+python /workspace/project/catatonia_VAE-main_bq/src/run_ConVAE_2D_train_adapt.py --atlas_name neuromorphometrics lpba40 --volume_type Vgm Vwm Vcsf --norm_diagnosis "MDD"
 
 
 # # Vgm	neuromorphometrics cobra lpba40	MDD
