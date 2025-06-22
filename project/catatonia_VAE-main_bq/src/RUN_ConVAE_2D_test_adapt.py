@@ -235,8 +235,7 @@ def main(args):
         "CTT-MDD": "#160C28"   # Dark Purple
     }
 
-    run_analysis_with_options(results_df, save_dir, True, "HC", 
-                            split_ctt=False, custom_colors=custom_colors, name = atlas_volume_string)
+    run_analysis_with_options(results_df, save_dir, col_jitter=False,norm_diagnosis="HC", split_ctt=False, custom_colors=custom_colors, name = atlas_volume_string)
     
     correlation_matrix, p_matrix, sig_matrix = create_corrected_correlation_heatmap(
         results_df=results_df,
@@ -267,7 +266,7 @@ def main(args):
     
     log_and_print_test("Generating visualizations...")
     
-    plot_deviation_distributions(results_df, save_dir, norm_diagnosis=norm_diagnosis, col_jitter=True, name = atlas_volume_string)
+    plot_deviation_distributions(results_df, save_dir, norm_diagnosis=norm_diagnosis, col_jitter=False, name = atlas_volume_string)
     log_and_print_test("Plotted deviation distributions")
     
     # Visualize embeddings in latent space

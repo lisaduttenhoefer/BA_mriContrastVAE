@@ -216,7 +216,6 @@ def create_colored_jitter_plots(data, metadata_df, metric, summary_df, plot_orde
         plt.ylabel("Diagnosis", fontsize=12)
         plt.grid(True, alpha=0.3, axis='x')
         plt.gca().invert_yaxis()
-        sns.despine()
         plt.tight_layout()
         
         ctt_suffix = "split" if split_ctt else "combined"
@@ -470,7 +469,6 @@ def plot_deviation_distributions(results_df, save_dir, col_jitter, norm_diagnosi
     plt.xlabel("Mean Reconstruction Error", fontsize=14)
     plt.ylabel("Density", fontsize=14)
     plt.legend(title="Diagnosis", fontsize=12)
-    sns.despine()
     plt.tight_layout()
     ctt_suffix = "split" if split_ctt else "combined"
     plt.savefig(f"{save_dir}/figures/distributions/recon_error_dist_ctt_{ctt_suffix}.png", dpi=300)
@@ -484,7 +482,6 @@ def plot_deviation_distributions(results_df, save_dir, col_jitter, norm_diagnosi
     plt.xlabel("Mean KL Divergence", fontsize=14)
     plt.ylabel("Density", fontsize=14)
     plt.legend(title="Diagnosis", fontsize=12)
-    sns.despine()
     plt.tight_layout()
     plt.savefig(f"{save_dir}/figures/distributions/kl_div_dist_ctt_{ctt_suffix}.png", dpi=300)
     plt.close()
@@ -497,7 +494,6 @@ def plot_deviation_distributions(results_df, save_dir, col_jitter, norm_diagnosi
     plt.xlabel("Deviation Score", fontsize=14)
     plt.ylabel("Density", fontsize=14)
     plt.legend(title="Diagnosis", fontsize=12)
-    sns.despine()
     plt.tight_layout()
     plt.savefig(f"{save_dir}/figures/distributions/deviation_score_dist_ctt_{ctt_suffix}.png", dpi=300)
     plt.close()
@@ -571,10 +567,9 @@ def plot_deviation_distributions(results_df, save_dir, col_jitter, norm_diagnosi
                             c=p_values_for_color, cmap='RdYlBu_r',
                             s=100, alpha=0.7, edgecolors='black')
         
-        plt.title(name, fontsize=14)
+        plt.title(f"Norm Diagnosis: {norm_diagnosis} \n {name}", fontsize=14)
         plt.xlabel(f"{metric.replace('_', ' ').title()}", fontsize=12)
         plt.ylabel("Diagnosis", fontsize=12)    
-        sns.despine()
         plt.tight_layout()
         plt.savefig(f"{save_dir}/figures/distributions/{metric}_errorbar_ctt_{ctt_suffix}.png", dpi=300)
         plt.close()
@@ -609,7 +604,6 @@ def plot_deviation_distributions(results_df, save_dir, col_jitter, norm_diagnosi
         plt.xlabel(f"{metric.replace('_', ' ').title()}", fontsize=12)
         plt.ylabel("Diagnosis", fontsize=12)
         plt.subplots_adjust(left=0.25)
-        sns.despine()
         plt.tight_layout()
         plt.savefig(f"{save_dir}/figures/distributions/{metric}_jitterplot_with_values_ctt_{ctt_suffix}.png", 
                    dpi=300, bbox_inches='tight')
@@ -975,7 +969,6 @@ def create_catatonia_subgroups(results_df, metadata_df, subgroup_columns, high_l
     
     return subgroups
 
-
 def analyze_regional_deviations(
         results_df, 
         save_dir, 
@@ -1148,56 +1141,102 @@ def analyze_regional_deviations(
     effect_sizes_df["Abs_Cohens_d"] = effect_sizes_df["Cohens_d"].abs()
     os.makedirs(f"{save_dir}/figures", exist_ok=True)
     
-    # Create visualization of top affected regions for each diagnosis
     for diagnosis in diagnoses:
         if diagnosis == norm_diagnosis:
             continue
-            
-        dx_effect_sizes = effect_sizes_df[effect_sizes_df["Diagnosis"] == diagnosis].copy()
         
+        dx_effect_sizes = effect_sizes_df[effect_sizes_df["Diagnosis"] == diagnosis].copy()
         if dx_effect_sizes.empty:
             continue
-            
+        
         # Sort by absolute effect size (Cliff's Delta)
         dx_effect_sizes_sorted = dx_effect_sizes.sort_values("Abs_Cliffs_Delta", ascending=False)
-        # Take top 20 regions
-        top_regions = dx_effect_sizes_sorted.head(20)
         
-        # Create bar plot for Cliff's Delta
-        plt.figure(figsize=(14, 10))
-        bars = plt.barh(range(len(top_regions)), top_regions["Cliffs_Delta"])
+        # Take top 15-20 regions
+        top_regions = dx_effect_sizes_sorted.head(16)  # Matching paper length
         
-        for i, bar in enumerate(bars):
-            if top_regions.iloc[i]["Cliffs_Delta"] < 0:
-                bar.set_color("#A1B5D8")
-            else:
-                bar.set_color("#D64045")
+        # Create plot EXACTLY like in the paper - SCHMALER
+        fig, ax = plt.subplots(figsize=(3, 6))  # Noch schmaler: von 4 auf 3
         
-        plt.yticks(range(len(top_regions)), top_regions["ROI_Name"])
-        plt.axvline(x=0, color="black", linestyle="--", alpha=0.7)
-        plt.title(f"Top 20 Regions ({diagnosis} vs {norm_diagnosis}) \n {name}")
-        plt.xlabel("Cliff's Delta")
+        # Create horizontal bar plot with confidence intervals
+        y_pos = np.arange(len(top_regions))
+        
+        # Calculate confidence intervals for effect sizes (no bootstrap testing)
+        # Standard error of the effect size (Cliff's Delta or Cohen's d)
+        n1 = len(dx_data)  # diagnosis group size
+        n2 = len(norm_data)  # control group size
+        
+        # For Cliff's Delta: approximate standard error
+        se_cliffs = np.sqrt((n1 + n2 + 1) / (3 * n1 * n2)) * np.sqrt(top_regions["Abs_Cliffs_Delta"])
+        
+        # Alternative: Standard error for Cohen's d
+        # se_cohens = np.sqrt((n1 + n2) / (n1 * n2) + top_regions["Cohens_d"]**2 / (2 * (n1 + n2)))
+        
+        ci_width = 1.96 * se_cliffs  # 95% confidence interval
+        
+        # Plot the confidence intervals as horizontal lines (like in paper)
+        for i, (idx, row) in enumerate(top_regions.iterrows()):
+            effect = row["Cliffs_Delta"]
+            ci_low = effect - ci_width.iloc[i]
+            ci_high = effect + ci_width.iloc[i]
+            
+            # Draw confidence interval line
+            ax.plot([ci_low, ci_high], [i, i], 'k-', linewidth=1.5, alpha=0.8)
+            
+            # Draw the point estimate as a circle (like in paper)
+            ax.plot(effect, i, 'ko', markersize=4, markerfacecolor='black', markeredgecolor='black')
+        
+        # Customize the plot to match paper EXACTLY
+        ax.set_yticks(y_pos)
+        ax.set_yticklabels(top_regions["ROI_Name"], fontsize=9)
+        ax.invert_yaxis()  # Highest effect at top
+        
+        # Add vertical dashed line at x=0 (like in paper)
+        ax.axvline(x=0, color="blue", linestyle="--", linewidth=1, alpha=0.7)
+        
+        # AUTOMATISCHE SKALIERUNG: Nur der benötigte Bereich
+        # Berechne Min/Max der tatsächlichen Konfidenzintervalle
+        all_ci_values = []
+        for i, (idx, row) in enumerate(top_regions.iterrows()):
+            effect = row["Cliffs_Delta"]
+            ci_low = effect - ci_width.iloc[i]
+            ci_high = effect + ci_width.iloc[i]
+            all_ci_values.extend([ci_low, ci_high])
+        
+        min_value = min(all_ci_values)
+        max_value = max(all_ci_values)
+        
+        # Kleine Puffer hinzufügen (5% des Bereichs)
+        value_range = max_value - min_value
+        buffer = value_range * 0.05
+        
+        ax.set_xlim(min_value - buffer, max_value + buffer)
+        ax.set_xlabel("Effect size", fontsize=10)
+        
+        # Title exactly like paper format
+        ax.set_title(f"Top 20 Regions {diagnosis} vs. {norm_diagnosis} \n ({atlas_name[0]} - {volume_type[0]})",fontsize=11, fontweight='bold', pad=10)
+        
+        # Keep ALL frame lines (like in paper) - don't remove any spines
+        ax.spines['top'].set_visible(True)
+        ax.spines['right'].set_visible(True)
+        ax.spines['left'].set_visible(True)
+        ax.spines['bottom'].set_visible(True)
+        
+        # Keep all ticks
+        ax.tick_params(axis='both', which='major', labelsize=9)
+        
+        # No grid (paper doesn't have grid)
+        ax.grid(False)
+        
+        # Tight layout
         plt.tight_layout()
-        plt.savefig(f"{save_dir}/figures/top_regions_cliffs_delta_{diagnosis}_vs_{norm_diagnosis}.png", dpi=300, bbox_inches='tight')
-        plt.close()
         
-        # Create bar plot for Cohen's d
-        plt.figure(figsize=(14, 10))
-        bars = plt.barh(range(len(top_regions)), top_regions["Cohens_d"])
-        
-        for i, bar in enumerate(bars):
-            if top_regions.iloc[i]["Cliffs_Delta"] < 0:
-                bar.set_color("#A1B5D8")
-            else:
-                bar.set_color("#D64045")
-                
-        plt.yticks(range(len(top_regions)), top_regions["ROI_Name"])
-        plt.axvline(x=0, color="black", linestyle="--", alpha=0.7)
-        plt.title(f"Top 20 Regions ({diagnosis} vs {norm_diagnosis}) \n {name}")
-        plt.xlabel("Cohen's d")
-        plt.tight_layout()
-        plt.savefig(f"{save_dir}/figures/top_regions_cohens_d_{diagnosis}_vs_{norm_diagnosis}.png", dpi=300, bbox_inches='tight')
+        # Save
+        plt.savefig(f"{save_dir}/figures/paper_style_{diagnosis}_vs_{norm_diagnosis}.png", 
+                    dpi=300, bbox_inches='tight', facecolor='white')
         plt.close()
+
+
         
     custom_palette = [
         "#125E8A",  # Lapis Lazuli
@@ -1387,11 +1426,7 @@ def analyze_regional_deviations(
                 print(f"Subgroups included: {remaining_columns}")
             else:
                 print("No data available for Heatmap 3")
-        else:
-            print("No remaining columns for Heatmap 3 after excluding SCHZ and MDD")
-    else:
-        print("Cannot create Heatmap 3 - no CTT top regions available")
-
+    
     print(f"\n=== Summary ===")
     print(f"Heatmap 1: 3 main diagnoses with top 30 CTT-affected regions")
     print(f"Heatmap 2: 3 main diagnoses with top 30 overall-affected regions") 
