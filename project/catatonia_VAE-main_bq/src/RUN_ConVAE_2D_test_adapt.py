@@ -30,7 +30,6 @@ from utils.dev_scores_utils import (
     calculate_deviations, 
     plot_deviation_distributions, 
     analyze_regional_deviations,
-    extract_roi_names,
     save_latent_visualizations,
     visualize_embeddings_multiple,
     create_corrected_correlation_heatmap,
@@ -266,9 +265,21 @@ def main(args):
     
     log_and_print_test("Generating visualizations...")
     
-    plot_deviation_distributions(results_df, save_dir, norm_diagnosis=norm_diagnosis, col_jitter=False, name = atlas_volume_string)
+    plot_results = plot_deviation_distributions(results_df, save_dir, norm_diagnosis=norm_diagnosis, col_jitter=False, name = atlas_volume_string)
     log_and_print_test("Plotted deviation distributions")
-    
+    deviation_score_summary_df = plot_results.get("deviation_score")
+
+    if deviation_score_summary_df is not None:
+        # Wählen Sie nur die Spalten 'Diagnosis', 'mean' und 'std' aus
+        selected_columns_df = deviation_score_summary_df[['Diagnosis', 'mean', 'std']]
+
+        file_path = os.path.join(save_dir, "deviation_score_mean_std.csv")
+        selected_columns_df.to_csv(file_path, index=False)
+        print(f"\nMittelwerte und Standardabweichungen für 'deviation_score' gespeichert in: {file_path}")
+    else:
+        print("\nDie Metrik 'deviation_score' wurde im plot_results-Dictionary nicht gefunden.")
+
+    print("\nSkriptausführung abgeschlossen.")
     # Visualize embeddings in latent space
     log_and_print_test("Visualizing latent space embeddings...")
     
