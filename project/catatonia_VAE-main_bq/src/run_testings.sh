@@ -127,4 +127,4 @@ python /workspace/project/catatonia_VAE-main_bq/src/RUN_ConVAE_2D_test_adapt.py 
 # # # python /workspace/project/catatonia_VAE-main_bq/src/RUN_ConVAE_2D_test_adapt.py --model_dir /workspace/project/catatonia_VAE-main_bq/analysis/TRAINING/norm_results_MDD_Vgm_Vwm_Vcsf_neuromorphometrics_cobra_20250605_2340
 
 # Vgm	neuromorphometrics lpba40	MDD
-python /workspace/project/catatonia_VAE-main_bq/src/RUN_ConVAE_2D_test_adapt.py --model_dir /workspace/project/catatonia_VAE-main_bq/analysis/TESTING/CTT/deviation_results_norm_results_MDD_V_g_m_neuromorphometrics_lpba40_20250620_1859_20250620_191916
+python /workspace/project/catatonia_VAE-main_bq/src/RUN_ConVAE_2D_test_adapt.py --model_dir /workspace/project/catatonia_VAE-main_bq/analysis/TRAINING/norm_results_MDD_V_g_m_neuromorphometrics_lpba40_20250620_1859
