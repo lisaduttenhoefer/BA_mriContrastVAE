@@ -234,7 +234,7 @@ def main(args):
         "CTT-MDD": "#160C28"   # Dark Purple
     }
 
-    run_analysis_with_options(results_df, save_dir, col_jitter=False,norm_diagnosis="HC", split_ctt=False, custom_colors=custom_colors, name = atlas_volume_string)
+    run_analysis_with_options(results_df, save_dir, col_jitter=False,norm_diagnosis="HC", split_ctt=True, custom_colors=custom_colors, name = atlas_volume_string)
     
     correlation_matrix, p_matrix, sig_matrix = create_corrected_correlation_heatmap(
         results_df=results_df,
@@ -242,7 +242,7 @@ def main(args):
         save_dir=save_dir,
         correction_method='fdr_bh',
         alpha=0.05,
-        merge_ctt_groups=True, 
+        merge_ctt_groups=False, 
         name = atlas_volume_string
     )
 
@@ -312,7 +312,7 @@ def main(args):
             roi_names=roi_names,
             norm_diagnosis=norm_diagnosis,
             add_catatonia_subgroups=True,
-            merge_ctt_groups=True,
+            merge_ctt_groups=False,
             metadata_path='/workspace/project/catatonia_VAE-main_bq/metadata_20250110/full_data_with_codiagnosis_and_scores.csv',
             subgroup_columns=['GAF_Score', 'PANSS_Positive', 'PANSS_Negative', 
                                     'PANSS_General', 'PANSS_Total', 'BPRS_Total', 'NCRS_Motor', 

@@ -190,26 +190,6 @@ def create_colored_jitter_plots(data, metadata_df, metric, summary_df, plot_orde
         else:
             cbar.set_label(f'{color_col.replace("_", " ").title()}', rotation=270, labelpad=20)
         
-        # # Add errorbars and statistics
-        # current_summary = summary_df[summary_df["Diagnosis"].isin(current_plot_order)]
-        
-        # for i, diagnosis in enumerate(current_plot_order):
-        #     diagnosis_data = current_summary[current_summary["Diagnosis"] == diagnosis]
-        #     if len(diagnosis_data) > 0:
-        #         mean_val = diagnosis_data["mean"].iloc[0]
-        #         ci_val = diagnosis_data["ci95"].iloc[0]
-                
-        #         # Add errorbar
-        #         plt.errorbar(mean_val, i, xerr=ci_val, fmt='none',
-        #                    color='black', capsize=4, capthick=2,
-        #                    elinewidth=2, alpha=0.9, zorder=10)
-                
-        #         # Add mean value as a larger marker
-        #         plt.scatter(mean_val, i, color='black', s=100,
-        #                   marker='D', alpha=0.9, zorder=11,
-        #                   edgecolors='white', linewidth=1)
-        
-    
         plt.yticks(range(len(current_plot_order)), current_plot_order)
         plt.title(f"{metric.replace('_', ' ').title()} by Diagnosis\nColored by {color_col.replace('_', ' ').title()} ({plot_title_suffix})",
                  fontsize=14, pad=20)
@@ -336,13 +316,8 @@ def calculate_deviations(normative_models, data_tensor, norm_diagnosis, annotati
 
 
 def calculate_group_pvalues(results_df, norm_diagnosis, split_ctt=False):
-    """Calculate p-values for each diagnosis group compared to the control group
+    #Calculate p-values for each diagnosis group compared to the control group
     
-    Args:
-        results_df: DataFrame with results
-        norm_diagnosis: Control group diagnosis
-        split_ctt: If True, keep CTT-SCHZ and CTT-MDD separate. If False, combine as CTT
-    """
 
     # Handle CTT splitting
     results_processed = results_df.copy()
@@ -403,12 +378,7 @@ def calculate_group_pvalues(results_df, norm_diagnosis, split_ctt=False):
     return group_pvalues
 
 def create_diagnosis_palette(split_ctt=False, custom_colors=None):
-    """Create consistent diagnosis color palette
-    
-    Args:
-        split_ctt: If True, separate colors for CTT-SCHZ and CTT-MDD. If False, single CTT color
-        custom_colors: Optional dict with custom color mapping
-    """
+    #Create consistent diagnosis color palette
     
     if custom_colors:
         return custom_colors
@@ -428,17 +398,8 @@ def create_diagnosis_palette(split_ctt=False, custom_colors=None):
 
 def plot_deviation_distributions(results_df, save_dir, col_jitter, norm_diagnosis, name,
                                 split_ctt=False, custom_colors=None):
-    """Plot distributions of deviation metrics by diagnosis group with group p-values
+    #Plot distributions of deviation metrics by diagnosis group with group p-values
     
-    Args:
-        results_df: DataFrame with results
-        save_dir: Directory to save plots
-        col_jitter: Whether to create colored jitter plots
-        norm_diagnosis: Control group diagnosis
-        split_ctt: If True, keep CTT-SCHZ and CTT-MDD separate. If False, combine as CTT
-        custom_colors: Optional dict with custom color mapping for diagnoses
-    """
-
     os.makedirs(f"{save_dir}/figures/distributions", exist_ok=True)
     
     # Handle CTT splitting
@@ -642,15 +603,8 @@ def plot_deviation_distributions(results_df, save_dir, col_jitter, norm_diagnosi
     return summary_dict
 
 def setup_plotting_parameters(split_ctt=False, custom_colors=None):
-    """Setup consistent plotting parameters for all functions
-    
-    Args:
-        split_ctt: If True, keep CTT-SCHZ and CTT-MDD separate. If False, combine as CTT
-        custom_colors: Optional dict with custom color mapping for diagnoses
-        
-    Returns:
-        dict: Dictionary with plotting parameters
-    """
+    #Setup consistent plotting parameters for all functions
+   
     
     return {
         'split_ctt': split_ctt,
@@ -660,32 +614,7 @@ def setup_plotting_parameters(split_ctt=False, custom_colors=None):
 
 def run_analysis_with_options(results_df, save_dir, col_jitter, norm_diagnosis, name,
                              split_ctt=False, custom_colors=None):
-    """Run complete analysis with CTT splitting and color options
-    
-    Args:
-        results_df: DataFrame with deviation results
-        save_dir: Directory to save outputs
-        col_jitter: Whether to create colored jitter plots
-        norm_diagnosis: Control group diagnosis
-        split_ctt: If True, keep CTT-SCHZ and CTT-MDD separate. If False, combine as CTT
-        custom_colors: Optional dict with custom color mapping for diagnoses
-        
-    Example:
-        # Run with CTT combined and default colors
-        run_analysis_with_options(results_df, save_dir, True, "HC", split_ctt=False)
-        
-        # Run with CTT split and custom colors
-        custom_colors = {
-            "HC": "#2E8B57",      # Sea Green
-            "SCHZ": "#DC143C",    # Crimson
-            "MDD": "#4169E1",     # Royal Blue
-            "CTT": "#FF8C00",     # Dark Orange
-            "CTT-SCHZ": "#FF6347", # Tomato
-            "CTT-MDD": "#FFD700"   # Gold
-        }
-        run_analysis_with_options(results_df, save_dir, True, "HC", 
-                                split_ctt=True, custom_colors=custom_colors)
-    """
+    #Run complete analysis with CTT splitting and color options
     
     print(f"Running analysis with CTT {'split' if split_ctt else 'combined'}")
     if custom_colors:
@@ -981,58 +910,41 @@ def get_atlas_abbreviations():
     }
 
 def format_roi_name_for_plotting(original_roi_name: str, atlas_name_from_config: str | List[str] = None) -> str:
-    """
-    Formatiert einen ROI-Namen in das gewünschte Plotting-Format: [Atlas-Abkürzung] ROI-Name (VolumeType).
-    Beispiel: neuromorphometrics_lSupMarG_Vgm -> [N] lSupMarG (Vgm)
     
-    Args:
-        original_roi_name (str): Der ursprüngliche ROI-Name (z.B. "atlas_roi_vt").
-        atlas_name_from_config (str | List[str]): Der/die Atlasname(n) aus der Konfiguration (z.B. "neuromorphometrics" oder ["neuromorphometrics", "suit"]).
-                                                 Wird verwendet, um den ursprünglichen Atlasnamen zu erkennen,
-                                                 falls 'all' oder eine Liste von Atlanten verwendet wurde.
-    Returns:
-        str: Der neu formatierte ROI-Name.
-    """
+    #Formatiert einen ROI-Namen im Plotting-Format: [Atlas-Abkürzung] ROI-Name (VolumeType)
     atlas_abbreviations = get_atlas_abbreviations()
 
     parts = original_roi_name.split('_')
     
     if len(parts) < 3: 
-        # Dies ist ein Fallback für Namen, die nicht dem erwarteten Format entsprechen
-        # und verhindert Fehler, falls z.B. generische Region_X Namen vorkommen.
+        
         return original_roi_name 
 
     volume_type = parts[-1] 
     
-    # Der Atlasname ist der erste Teil des Original-ROI-Namens
     detected_atlas_prefix = parts[0]
-    
-    # Der ROI-Name ist alles dazwischen
     roi_name = "_".join(parts[1:-1])
-
-    # Bestimme den tatsächlichen Atlasnamen für die Abkürzungssuche
     current_atlas_for_lookup = None
     if isinstance(atlas_name_from_config, str):
-        # Wenn nur ein Atlas in der Config war (z.B. "neuromorphometrics")
+        
         current_atlas_for_lookup = atlas_name_from_config
     elif isinstance(atlas_name_from_config, list):
-        # Wenn 'all' oder eine Liste in der Config war, verwenden wir den erkannten Präfix
-        # und prüfen, ob er in unseren bekannten Atlanten ist.
+    
         for full_atlas_name, abbr in atlas_abbreviations.items():
             if full_atlas_name.startswith(detected_atlas_prefix):
                 current_atlas_for_lookup = full_atlas_name
                 break
         if current_atlas_for_lookup is None:
-            # Fallback, wenn der Präfix nicht direkt zugeordnet werden kann, aber in den Teilen ist
+            
             current_atlas_for_lookup = detected_atlas_prefix
     else:
-        # Sehr unwahrscheinlicher Fall, aber zur Sicherheit
-        current_atlas_for_lookup = detected_atlas_prefix # Nutze den erkannten Präfix als Fallback
+        
+        current_atlas_for_lookup = detected_atlas_prefix 
 
-    # Abkürzung für den Atlas abrufen
+  
     atlas_abbr = atlas_abbreviations.get(current_atlas_for_lookup, f"[{detected_atlas_prefix[:1].upper()}]")
     
-    # Kombinieren im neuen Format
+   
     return f"{atlas_abbr} {roi_name} ({volume_type})"
 
 def format_roi_names_list_for_plotting(roi_names_list: List[str], atlas_name_from_config: str | List[str] = None) -> List[str]:
@@ -1072,41 +984,26 @@ def bootstrap_cliffs_delta_ci(data1: np.ndarray, data2: np.ndarray, num_bootstra
     # Sicherstellen, dass Indizes nicht außerhalb der Array-Grenzen liegen
     lower_bound = sorted_deltas[lower_bound_idx] if lower_bound_idx < len(sorted_deltas) else np.nan
     upper_bound = sorted_deltas[upper_bound_idx] if upper_bound_idx < len(sorted_deltas) else np.nan
-
-
-    # --- P-Wert Schätzung aus Bootstrap-Verteilung (zweiseitig) ---
-    # Hier zählen wir, wie viele gebootstrappte Deltas die Nullhypothese
-    # (d.h. Delta = 0) "überkreuzen" oder auf der entgegengesetzten Seite
-    # des originalen Deltas liegen.
-
     # Count of bootstrapped deltas that are on the "other side" of 0
     # compared to the original delta, or are exactly 0.
     if original_delta >= 0:
-        # If original delta is non-negative, count how many bootstrapped deltas are <= 0
-        # (This is for the "lower tail" equivalent for a positive observed effect)
-        # Or, more formally for a two-sided test, proportion of samples as extreme as or more extreme than original_delta
-        # in either tail.
-        # This is the standard way to calculate p-value from bootstrap distribution for H0: delta=0
-        # Proportion of values >= |original_delta| OR <= -|original_delta|
+       
         count_extreme = np.sum(np.abs(sorted_deltas) >= np.abs(original_delta))
         p_value = count_extreme / num_bootstraps
         
-    else: # original_delta < 0
-        # If original delta is negative, count how many bootstrapped deltas are >= 0
-        # (This is for the "upper tail" equivalent for a negative observed effect)
+    else: 
         count_extreme = np.sum(np.abs(sorted_deltas) >= np.abs(original_delta))
         p_value = count_extreme / num_bootstraps
     
-    # Der p-Wert sollte nicht 0 sein, da das bei Bootstrap selten vorkommt und numerische Probleme verursachen könnte.
-    # Setze einen minimalen P-Wert, um Division by Zero oder zu aggressive Schlussfolgerungen zu vermeiden.
     p_value = max(p_value, 1.0 / num_bootstraps) # Minimaler p-Wert ist 1/N_bootstraps
     p_value = min(p_value, 1.0) # Maximaler p-Wert ist 1.0
 
     return lower_bound, upper_bound, p_value
+
 def analyze_regional_deviations(
         results_df,
         save_dir,
-        clinical_data_path,
+        clinical_data_path, 
         volume_type,
         atlas_name,
         roi_names,
@@ -1215,12 +1112,9 @@ def analyze_regional_deviations(
             except Exception as e:
                 print(f"Error loading metadata or creating subgroups: {e}")
 
-        p_values_for_correction = []
-        corresponding_effect_size_indices = []
-
         # Allgemeine Funktion zur Verarbeitung von Diagnosegruppen und Subgruppen
         def process_group(group_name, group_data):
-            nonlocal p_values_for_correction, corresponding_effect_size_indices, effect_sizes
+            nonlocal effect_sizes # Declare effect_sizes as nonlocal to modify the outer scope list
 
             if len(group_data) == 0:
                 print(f"No data found for group: {group_name}")
@@ -1254,10 +1148,6 @@ def analyze_regional_deviations(
                     # Signifikanz basiert auf dem CI (ob es 0 überlappt)
                     if (cliff_delta_ci_low > 0) or (cliff_delta_ci_high < 0):
                         is_significant_p05_uncorrected = True
-                
-                # Sammle den P-Wert für die Korrektur (auch wenn nicht für Sternchen genutzt)
-                p_values_for_correction.append(p_val_from_bootstrap)
-                corresponding_effect_size_indices.append(len(effect_sizes))
 
                 pooled_std = np.sqrt(((len(group_region_values) - 1) * group_std**2 +
                                     (len(norm_region_values) - 1) * norm_std**2) /
@@ -1280,7 +1170,7 @@ def analyze_regional_deviations(
                     "Cliffs_Delta_CI_High": cliff_delta_ci_high,
                     "Significant_Bootstrap_p05_uncorrected": is_significant_p05_uncorrected,
                     "Cohens_d": cohens_d,
-                    "P_Value_Uncorrected": p_val_from_bootstrap
+                    "P_Value_Uncorrected": p_val_from_bootstrap # Still kept, but not used for asterisk logic
                 })
 
         # Verarbeite Hauptdiagnosen
@@ -1301,33 +1191,7 @@ def analyze_regional_deviations(
             print("No effect sizes calculated. Returning empty DataFrame.")
             return effect_sizes_df
 
-        # # --- Multiple Testkorrektur anwenden (Ergebnisse werden weiterhin im DF gespeichert) ---
-        # valid_p_values = [p_val for p_val in p_values_for_correction if not pd.isna(p_val)]
-        # valid_p_values = [p_values_for_correction[i] for i in p_values_for_correction if not pd.isna(i)] # Korrigiert: uses p_values_for_correction directly
-
-        # if valid_p_values:
-        #     reject, pvals_corrected, _, _ = multipletests(
-        #         pvals=valid_p_values,
-        #         alpha=0.05,
-        #         method='fdr_bh'
-        #     )
-
-        #     effect_sizes_df['Significant_Bootstrap_p05_corrected'] = False
-        #     effect_sizes_df['P_Value_Corrected_FDR'] = np.nan
-
-        #     for i, original_df_idx in enumerate(corresponding_effect_size_indices):
-        #         if original_df_idx < len(effect_sizes_df):
-        #             # Stellen Sie sicher, dass `original_df_idx` einen gültigen P-Wert hatte,
-        #             # bevor der korrigierte Wert zugewiesen wird.
-        #             if original_df_idx in valid_p_values_indices: # <-- added check
-        #                 idx_in_valid_p_values = valid_p_values_indices.index(original_df_idx)
-        #                 effect_sizes_df.loc[original_df_idx, 'Significant_Bootstrap_p05_corrected'] = reject[idx_in_valid_p_values]
-        #                 effect_sizes_df.loc[original_df_idx, 'P_Value_Corrected_FDR'] = pvals_corrected[idx_in_valid_p_values]
-        # else:
-        #     print("No valid p-values to apply multiple test correction for main effects.")
-        #     effect_sizes_df['Significant_Bootstrap_p05_corrected'] = False # Default to False if no valid p-values
-        #     effect_sizes_df['P_Value_Corrected_FDR'] = np.nan
-
+        # Multiple Testkorrektur segments removed as per request.
 
         effect_sizes_df["Abs_Cliffs_Delta"] = effect_sizes_df["Cliffs_Delta"].abs()
         effect_sizes_df["Abs_Cohens_d"] = effect_sizes_df["Cohens_d"].abs()
@@ -1386,7 +1250,7 @@ def analyze_regional_deviations(
             display_volume_type = volume_type[0] if isinstance(volume_type, list) and volume_type else ""
             display_atlas_name = atlas_name[0] if isinstance(atlas_name, list) and atlas_name else ""
 
-            ax.set_title(f"Top 16 Regions {diagnosis} vs. {norm_diagnosis} \n ({display_atlas_name} - {display_volume_type})",fontsize=11, fontweight='bold', pad=10)
+            ax.set_title(f"Top 16 Regions {diagnosis} vs. {norm_diagnosis} \n ({name})",fontsize=11, fontweight='bold', pad=10)
 
             ax.spines['top'].set_visible(True)
             ax.spines['right'].set_visible(True)
@@ -1491,7 +1355,7 @@ def analyze_regional_deviations(
         heatmap_df = pd.DataFrame(heatmap_data)
         heatmap_df.set_index("ROI_Name", inplace=True)
         heatmap_df = heatmap_df.dropna(axis=1, how='all')
-        
+
         significance_flags_matrix = significance_flags_matrix.loc[heatmap_df.index, heatmap_df.columns]
 
         def annotate_cell_with_significance(value, is_significant):
@@ -1669,9 +1533,6 @@ def analyze_regional_deviations(
             print(f"Dataset categories: {dataset_categories}")
 
             dataset_split_effects = []
-            
-            p_values_for_dataset_correction = []
-            corresponding_dataset_effect_size_indices = []
 
             if merge_ctt_groups:
                 main_diagnoses = ['SCHZ', 'MDD', 'CTT']
@@ -1719,9 +1580,6 @@ def analyze_regional_deviations(
                         if not pd.isna(ci_low) and not pd.isna(ci_high):
                             if (ci_low > 0) or (ci_high < 0):
                                 is_significant_p05_dataset_uncorrected = True
-                        
-                        p_values_for_dataset_correction.append(p_val_dataset_from_bootstrap)
-                        corresponding_dataset_effect_size_indices.append(len(dataset_split_effects))
 
                         dataset_split_effects.append({
                             'Diagnosis_Dataset': f"{diagnosis}-{category_name}",
@@ -1730,37 +1588,14 @@ def analyze_regional_deviations(
                             'ROI_Name': roi_name_for_output,
                             'Cliffs_Delta': cliff_delta,
                             'Significant_Bootstrap_p05_uncorrected': is_significant_p05_dataset_uncorrected,
-                            'P_Value_Uncorrected': p_val_dataset_from_bootstrap,
+                            'P_Value_Uncorrected': p_val_dataset_from_bootstrap, # Still kept, but not used for asterisk logic
                             'N_Subjects': len(category_values)
                         })
 
             if dataset_split_effects:
                 dataset_effects_df = pd.DataFrame(dataset_split_effects)
-                
-                # --- Multiple Testkorrektur für Dataset-Split-Effekte (Ergebnisse werden weiterhin im DF gespeichert) ---
-                valid_p_dataset_indices = [i for i, p_val in enumerate(p_values_for_dataset_correction) if not pd.isna(p_val)]
-                valid_p_dataset = [p_values_for_dataset_correction[i] for i in p_values_for_dataset_correction if not pd.isna(i)]
 
-                if valid_p_dataset:
-                    reject_dataset, pvals_corrected_dataset, _, _ = multipletests(
-                        pvals=valid_p_dataset,
-                        alpha=0.05,
-                        method='fdr_bh'
-                    )
-                    dataset_effects_df['Significant_Bootstrap_p05_corrected'] = False
-                    dataset_effects_df['P_Value_Corrected_FDR'] = np.nan
-                    
-                    for i, original_df_idx in enumerate(corresponding_dataset_effect_size_indices):
-                        if original_df_idx < len(dataset_effects_df):
-                            if original_df_idx in valid_p_dataset_indices: # <-- added check
-                                idx_in_valid_p_dataset = valid_p_dataset_indices.index(original_df_idx)
-                                dataset_effects_df.loc[original_df_idx, 'Significant_Bootstrap_p05_corrected'] = reject_dataset[idx_in_valid_p_dataset]
-                                dataset_effects_df.loc[original_df_idx, 'P_Value_Corrected_FDR'] = pvals_corrected_dataset[idx_in_valid_p_dataset]
-                else:
-                    print("No valid p-values to apply multiple test correction for dataset split.")
-                    dataset_effects_df['Significant_Bootstrap_p05_corrected'] = False
-                    dataset_effects_df['P_Value_Corrected_FDR'] = np.nan
-
+                # Multiple Testkorrektur for dataset-split effects removed.
 
                 heatmap_dataset = dataset_effects_df.pivot(
                     index='ROI_Name',
@@ -1864,6 +1699,7 @@ def analyze_regional_deviations(
         print("[INFO] Regional deviation analysis finished.")
 
         return effect_sizes_df
+
 ######################################################## CORRELATION ANALYSIS ################################################################
 
 
@@ -1871,24 +1707,9 @@ def create_corrected_correlation_heatmap(results_df, metadata_df, save_dir, name
                                        correction_method='fdr_bh',
                                        alpha=0.05,
                                        merge_ctt_groups=True):
-    """
-    Erstellt eine Heatmap mit korrigierten Korrelationen zwischen Deviation Scores 
-    der Patientengruppen und klinischen Scores
+   
+   # Erstellt eine Heatmap mit korrigierten Korrelationen zwischen Deviation Scores 
     
-    Parameters:
-    -----------
-    results_df : DataFrame
-        DataFrame mit Deviation Scores und Diagnosen
-    metadata_df : path 
-    save_dir : str
-        Pfad zum Speichern der Heatmap
-    correction_method : str
-        'bonferroni', 'fdr_bh', 'fdr_by', 'holm'
-    alpha : float
-        Signifikanzlevel (default: 0.05)
-    merge_ctt_groups : bool
-        CTT-SCHZ und CTT-MDD zu CTT zusammenfassen (default: True)
-    """
     metadata_df = pd.read_csv(metadata_df)
     # CTT Gruppen zusammenfassen falls gewünscht
     if merge_ctt_groups:
@@ -1934,7 +1755,7 @@ def create_corrected_correlation_heatmap(results_df, metadata_df, save_dir, name
         for j, score in enumerate(available_scores):
             valid_data = diag_data[['deviation_score', score]].dropna()
             
-            if len(valid_data) >= 3:  # Mindestens 3 Datenpunkte
+            if len(valid_data) >= 3: 
                 r, p = pearsonr(valid_data['deviation_score'], valid_data[score])
                 correlation_matrix[i, j] = r
                 p_value_matrix[i, j] = p
@@ -2007,14 +1828,11 @@ def create_corrected_correlation_heatmap(results_df, metadata_df, save_dir, name
     plt.yticks(rotation=0)
     plt.tight_layout()
     
-    # Speichern
-    import os
     os.makedirs(f"{save_dir}/figures", exist_ok=True)
     filename = f"{save_dir}/figures/patient_correlations_{correction_method}_corrected.png"
     plt.savefig(filename, dpi=300, bbox_inches='tight')
     plt.show()
     
-    # Zusammenfassung ausgeben
     total_tests = len([p for p in all_p_values if not np.isnan(p)])
     significant_corrected = np.sum(significance_matrix)
     
@@ -2025,7 +1843,6 @@ def create_corrected_correlation_heatmap(results_df, metadata_df, save_dir, name
     print(f"Alpha-Level: {alpha}")
     print(f"Heatmap gespeichert: {filename}")
     
-    # Detaillierte Ergebnisse für signifikante Korrelationen
     print(f"\n=== SIGNIFIKANTE KORRELATIONEN ===")
     for idx, (i, j, diagnosis, score, n, r, p_orig) in enumerate(correlation_info):
         if significance_matrix[i, j]:
