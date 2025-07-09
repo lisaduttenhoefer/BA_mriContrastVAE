@@ -70,7 +70,7 @@ This study addresses the critical need for objective and interpretable approache
     * **`support_f.py`**: Contains utilities for data handling, splitting dataframes, and preprocessing.
 
 ## Data & Experiments (additional files needed for code usage)
-
+* **`result_examples/`**: example results: file with all plots from testing (Neuromorphometrics/LPBA40, HC, Vgm) & html files for interactive plots and static brain plots
 * **`data/`**: All data needed to run the code.
     * `.csv` and `.h5` files with the data of the patients.
     * `.nii` files for the atlases that you want to get visualized in the plot brains.
